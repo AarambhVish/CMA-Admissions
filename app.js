@@ -1,0 +1,1721 @@
+const storeKey = "cmaAdmissionCrm.v1";
+const tabs = [
+  ["dashboard", "Dashboard"],
+  ["leads", "Leads"],
+  ["archive", "Archive"],
+  ["followups", "Follow-ups"],
+  ["admissions", "Admissions"],
+  ["targets", "Targets & Promotion"],
+  ["whatsapp", "WhatsApp Templates"],
+  ["reports", "Reports"],
+  ["users", "Users / Admins"],
+  ["settings", "Master Settings"]
+];
+
+const defaultMasters = {
+  courses: ["CMA Foundation", "CMA Intermediate", "CMA Final"],
+  branches: ["Andheri", "Borivali", "Dadar", "Thane", "Online"],
+  sources: ["Existing students", "Past Students", "Classes Owner", "Advertisement"],
+  statuses: ["New Lead", "Contacted", "Interested", "Prospectus Sent", "Demo Attended", "Follow-up Required", "Parent Discussion Pending", "Fees Discussion Pending", "Converted / Admitted", "Not Interested", "Not Reachable", "Lost Lead"],
+  roles: ["Super Admin", "Lead Manager", "Counsellor / Admin"],
+  batches: ["Morning Batch", "Evening Batch", "Weekend Batch"]
+};
+
+const providedPlanning = {
+  courses: ["CMA Intermediate", "CMA Foundation"],
+  branches: ["Borivali", "Mulund", "Online", "Dadar", "Vashi", "Ghatkopar", "Andheri", "Dombivali", "Ullashnagar"],
+  batches: ["CMA Inter June 2027", "CMA Foundation Dec 2026", "CMA Foundation June 2027"],
+  targets: [
+    {
+      title: "CMA Target & Promotion Dec 26, June 27",
+      course: "CMA Intermediate",
+      attempt: "June 2027",
+      rows: [
+        { branch: "Borivali", currentBase: 0, target: 100 },
+        { branch: "Mulund", currentBase: 0, target: 100 },
+        { branch: "Online", currentBase: 0, target: 50 },
+        { branch: "Dadar", currentBase: 0, target: 50 },
+        { branch: "Vashi", currentBase: 0, target: 50 },
+        { branch: "Ghatkopar", currentBase: 0, target: 50 },
+        { branch: "Andheri", currentBase: 0, target: 50 }
+      ]
+    },
+    {
+      title: "CMA Target & Promotion Dec 26, June 27",
+      course: "CMA Foundation",
+      attempt: "December 2026",
+      rows: [
+        { branch: "Borivali", currentBase: 99, target: 150 },
+        { branch: "Andheri", currentBase: 40, target: 80 },
+        { branch: "Dadar", currentBase: 21, target: 50 },
+        { branch: "Ghatkopar", currentBase: 39, target: 50 },
+        { branch: "Mulund", currentBase: 50, target: 100 },
+        { branch: "Vashi", currentBase: 38, target: 50 },
+        { branch: "Dombivali", currentBase: 39, target: 50 },
+        { branch: "Online", currentBase: 7, target: 25 },
+        { branch: "Ullashnagar", currentBase: 20, target: 45 }
+      ]
+    },
+    {
+      title: "CMA Target & Promotion Dec 26, June 27",
+      course: "CMA Foundation",
+      attempt: "June 2027",
+      rows: [
+        { branch: "Borivali", currentBase: 100, target: 50 },
+        { branch: "Andheri", currentBase: 50, target: 50 },
+        { branch: "Dadar", currentBase: 50, target: 50 },
+        { branch: "Ghatkopar", currentBase: 39, target: 50 },
+        { branch: "Mulund", currentBase: 50, target: 70 },
+        { branch: "Vashi", currentBase: 38, target: 50 },
+        { branch: "Dombivali", currentBase: 39, target: 30 },
+        { branch: "Online", currentBase: 7, target: 50 },
+        { branch: "Ullashnagar", currentBase: 20, target: 50 }
+      ]
+    }
+  ]
+};
+
+const seed = {
+  leads: [],
+  followups: [],
+  admissions: [],
+  users: [],
+  templates: [],
+  targets: [],
+  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [] }
+};
+
+let state = load();
+let masters = state.masters;
+let activeTab = "dashboard";
+let parsedBulk = [];
+let currentUser = null;
+let syncTimer = null;
+let isCloudLoading = false;
+
+function id() { return Math.random().toString(36).slice(2, 10); }
+function todayDate() { return new Date().toISOString().slice(0, 10); }
+function futureHours(n) { const d = new Date(); d.setHours(d.getHours() + n); return localInputValue(d); }
+function pastHours(n) { const d = new Date(); d.setHours(d.getHours() - n); return localInputValue(d); }
+function localInputValue(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+function load() {
+  const raw = localStorage.getItem(storeKey);
+  if (!raw) {
+    localStorage.setItem(storeKey, JSON.stringify(seed));
+    return structuredClone(seed);
+  }
+  const loaded = JSON.parse(raw);
+  loaded.masters = {
+    courses: loaded.masters?.courses || [],
+    branches: loaded.masters?.branches || [],
+    sources: mergeReferenceOptions(loaded.masters?.sources || []),
+    statuses: loaded.masters?.statuses || [],
+    roles: loaded.masters?.roles || [],
+    batches: loaded.masters?.batches || []
+  };
+  loaded.targets = loaded.targets || [];
+  if (!loaded.planningSeeded) {
+    ensureProvidedPlanning(loaded);
+    loaded.planningSeeded = true;
+    localStorage.setItem(storeKey, JSON.stringify(loaded));
+  }
+  return loaded;
+}
+function save() {
+  state.masters = masters;
+  localStorage.setItem(storeKey, JSON.stringify(state));
+  queueCloudSave();
+}
+
+function loadCurrentUser() {
+  const userId = localStorage.getItem(`${storeKey}.currentUserId`);
+  currentUser = state.users.find(user => user.id === userId) || null;
+  updateAuthView();
+}
+
+function loginUser(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const loginId = data.loginId.trim().toLowerCase();
+  const user = state.users.find(u =>
+    [firstNameOf(u.name), u.mobile, u.email].filter(Boolean).some(value => String(value).toLowerCase() === loginId)
+  );
+  const loginError = document.getElementById("loginError");
+  if (!user) {
+    loginError.textContent = "User not found. Use first name, mobile, or email.";
+    loginError.classList.remove("hidden");
+    return;
+  }
+  currentUser = user;
+  localStorage.setItem(`${storeKey}.currentUserId`, user.id);
+  e.target.reset();
+  loginError.classList.add("hidden");
+  updateAuthView();
+  render();
+}
+
+function logoutUser() {
+  localStorage.removeItem(`${storeKey}.currentUserId`);
+  currentUser = null;
+  const loginScreen = document.getElementById("loginScreen");
+  if (loginScreen) loginScreen.classList.remove("hidden");
+  const badge = document.getElementById("currentUserBadge");
+  if (badge) badge.textContent = hasLoginReady() ? "Logged out" : "Setup user passwords";
+  document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
+}
+
+function updateAuthView() {
+  document.getElementById("loginScreen").classList.toggle("hidden", Boolean(currentUser) || !hasLoginReady());
+  const badge = document.getElementById("currentUserBadge");
+  if (badge) badge.textContent = currentUser ? `${currentUser.name} | ${currentUser.role}` : "Setup user passwords";
+}
+
+function isSuperAdmin() {
+  return currentUser?.role === "Super Admin";
+}
+
+function isLeadManager() {
+  return currentUser?.role === "Lead Manager";
+}
+
+function canActOnLead(lead) {
+  if (!currentUser) return false;
+  if (isSuperAdmin() || isLeadManager()) return true;
+  return lead.assignedTo === currentUser.name;
+}
+
+function canAssignLead() {
+  return isSuperAdmin() || isLeadManager();
+}
+
+function canPermanentlyDelete() {
+  return isSuperAdmin() || isLeadManager();
+}
+
+function hasLoginReady() {
+  return state.users.length > 0;
+}
+
+function mergeReferenceOptions(values) {
+  const oldDefaults = ["Walk-in", "Website enquiry", "WhatsApp campaign", "Instagram / Facebook", "YouTube", "Seminar", "Webinar", "School / college tie-up", "Reference", "Raw data calling", "Branch enquiry"];
+  const custom = values.filter(value => !oldDefaults.includes(value));
+  return [...new Set([...defaultMasters.sources, ...custom])];
+}
+
+function ensureProvidedPlanning(data) {
+  providedPlanning.courses.forEach(course => addUnique(data.masters.courses, course));
+  providedPlanning.branches.forEach(branch => addUnique(data.masters.branches, branch));
+  providedPlanning.batches.forEach(batch => addUnique(data.masters.batches, batch));
+
+  providedPlanning.targets.forEach(plan => {
+    const exists = data.targets.some(target =>
+      target.title === plan.title &&
+      target.course === plan.course &&
+      target.attempt === plan.attempt
+    );
+    if (!exists) {
+      data.targets.push({
+        id: id(),
+        ...structuredClone(plan),
+        createdAt: todayDate()
+      });
+    }
+  });
+}
+
+function addUnique(list, value) {
+  if (!list.includes(value)) list.push(value);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  renderTabs();
+  hydrateSelects();
+  bindEvents();
+  loadCurrentUser();
+  applyTheme(getThemeSetting());
+  if (getSheetSyncSettings().auto && getSheetSyncSettings().url) loadFromSheet({ silent: true });
+  render();
+});
+
+function renderTabs() {
+  const nav = document.getElementById("tabs");
+  nav.innerHTML = tabs.map(([key, label]) => `<button data-tab="${key}">${label}</button>`).join("");
+}
+
+function bindEvents() {
+  document.getElementById("tabs").addEventListener("click", e => {
+    if (!e.target.dataset.tab) return;
+    activeTab = e.target.dataset.tab;
+    render();
+  });
+  document.getElementById("loginForm").addEventListener("submit", loginUser);
+  document.getElementById("logoutBtn").addEventListener("click", logoutUser);
+  document.getElementById("themeSelect").addEventListener("change", e => setTheme(e.target.value));
+  document.getElementById("globalSearch").addEventListener("input", render);
+  document.getElementById("addLeadTop").addEventListener("click", openLeadForm);
+  document.querySelector("[data-open-form]").addEventListener("click", openLeadForm);
+  document.querySelector("[data-open-bulk]").addEventListener("click", () => document.getElementById("bulkDialog").showModal());
+  document.querySelectorAll("[data-close-modal]").forEach(b => b.addEventListener("click", () => document.getElementById("leadDialog").close()));
+  document.querySelectorAll("[data-close-bulk]").forEach(b => b.addEventListener("click", () => document.getElementById("bulkDialog").close()));
+  document.querySelectorAll("[data-close-followup]").forEach(b => b.addEventListener("click", () => document.getElementById("followupDialog").close()));
+  document.querySelectorAll("[data-close-admission]").forEach(b => b.addEventListener("click", () => document.getElementById("admissionDialog").close()));
+  document.querySelectorAll("[data-close-assign-admin]").forEach(b => b.addEventListener("click", () => document.getElementById("assignAdminDialog").close()));
+  document.getElementById("leadForm").addEventListener("submit", saveLead);
+  document.getElementById("educationLevel").addEventListener("change", updateEducationFields);
+  document.getElementById("referenceType").addEventListener("change", updateReferenceFields);
+  document.getElementById("followupForm").addEventListener("submit", saveFollowup);
+  document.getElementById("admissionForm").addEventListener("submit", saveAdmission);
+  document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
+  document.getElementById("targetPlanForm").addEventListener("submit", saveTargetPlan);
+  document.getElementById("templateForm").addEventListener("submit", saveTemplate);
+  document.getElementById("userForm").addEventListener("submit", saveUser);
+  document.getElementById("parseBulk").addEventListener("click", parseBulk);
+  document.getElementById("saveBulk").addEventListener("click", saveBulk);
+  document.getElementById("exportLeads").addEventListener("click", () => exportCsv("leads.csv", activeLeads()));
+  document.getElementById("exportAdmissions").addEventListener("click", () => exportCsv("admissions.csv", admissionsWithLead()));
+  document.body.addEventListener("click", routeActions);
+  document.body.addEventListener("change", routeSelectActions);
+}
+
+function hydrateSelects() {
+  fillSelects("course", masters.courses);
+  fillSelects("branch", masters.branches);
+  fillSelects("source", masters.sources);
+  fillSelects("status", masters.statuses);
+  fillSelects("stage", masters.statuses);
+  fillSelects("role", masters.roles);
+  fillSelects("batch", masters.batches);
+  fillSelects("assignedTo", state.users.map(u => u.name));
+  fillSelects("counsellor", state.users.map(u => u.name));
+}
+function fillSelects(name, values) {
+  document.querySelectorAll(`[name="${name}"]`).forEach(select => {
+    const current = select.value;
+    const finalValues = ["branch", "batch"].includes(name) ? ["Unassigned", ...values.filter(v => v !== "Unassigned")] : values;
+    select.innerHTML = finalValues.map(v => `<option>${v}</option>`).join("");
+    if (finalValues.includes(current)) select.value = current;
+  });
+}
+
+function render() {
+  if (!currentUser && hasLoginReady()) {
+    updateAuthView();
+    return;
+  }
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === activeTab));
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === activeTab));
+  document.getElementById("pageTitle").textContent = tabs.find(t => t[0] === activeTab)[1];
+  document.getElementById("addLeadTop").disabled = !currentUser;
+  updateAuthView();
+  hydrateSelects();
+  renderDashboard();
+  renderFilters();
+  renderLeadTable();
+  renderArchive();
+  renderFollowups();
+  renderAdmissions();
+  renderTargetPlans();
+  renderTemplates();
+  renderReports();
+  renderUsers();
+  renderSettings();
+}
+
+function activeLeads() {
+  return state.leads.filter(l => !l.archivedAt);
+}
+
+function archivedLeads() {
+  return state.leads.filter(l => l.archivedAt);
+}
+
+function filteredLeads(prefix = "lead") {
+  const q = document.getElementById("globalSearch").value.trim().toLowerCase();
+  return activeLeads().filter(l => {
+    const searchOk = !q || [displayLeadName(l), l.studentMobile, l.parentMobile].join(" ").toLowerCase().includes(q);
+    return searchOk && ["course", "branch", "source", "status", "assignedTo"].every(key => {
+      const el = document.getElementById(`${prefix}-${key}`);
+      return !el || !el.value || l[key] === el.value;
+    });
+  });
+}
+
+function renderDashboard() {
+  const leads = filteredLeads();
+  const converted = leads.filter(l => l.status === "Converted / Admitted").length;
+  const overdue = leads.filter(isOverdue).length;
+  const pending = leads.filter(l => l.followupAt && l.status !== "Converted / Admitted").length;
+  const untouched = untouchedLeads(leads);
+  const metrics = [
+    ["Total leads", leads.length],
+    ["New leads", countBy(leads, "status")["New Lead"] || 0],
+    ["Contacted", countBy(leads, "status")["Contacted"] || 0],
+    ["Untouched leads", untouched.length],
+    ["Pending follow-ups", pending],
+    ["Overdue follow-ups", overdue],
+    ["Converted", converted],
+    ["Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"],
+    ["Lost leads", (countBy(leads, "status")["Lost Lead"] || 0) + (countBy(leads, "status")["Not Interested"] || 0)]
+  ];
+  document.getElementById("metricGrid").innerHTML = metrics.map(m => metric(m[0], m[1])).join("");
+  renderBarList("courseChart", countBy(leads, "course"));
+  renderAdminPerformance();
+  table("dashboardFollowups", leads.filter(l => dueToday(l) || isOverdue(l)), ["Student", "Mobile", "Course", "Admin", "Follow-up", "Status"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, formatDate(l.followupAt), statusText(l.status)]);
+  table("untouchedLeads", untouched, ["Student", "Mobile", "Course", "Admin", "Untouched Since"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, untouchedLabel(l)]);
+}
+
+function metric(label, value) { return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`; }
+function countBy(rows, key) { return rows.reduce((a, r) => (a[r[key] || "Blank"] = (a[r[key] || "Blank"] || 0) + 1, a), {}); }
+function renderBarList(idName, counts) {
+  const max = Math.max(1, ...Object.values(counts));
+  document.getElementById(idName).innerHTML = Object.entries(counts).map(([name, value]) => `<div class="bar-row"><span>${name}</span><div class="bar"><span style="width:${value / max * 100}%"></span></div><strong>${value}</strong></div>`).join("") || "<p class='muted'>No data yet.</p>";
+}
+function renderAdminPerformance() {
+  const rows = state.users.map(u => {
+    const leads = activeLeads().filter(l => l.assignedTo === u.name);
+    const converted = leads.filter(l => l.status === "Converted / Admitted").length;
+    return { name: u.name, assigned: leads.length, followups: state.followups.filter(f => f.createdBy === u.name).length, pending: leads.filter(l => l.followupAt && !isOverdue(l)).length, converted, ratio: leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%" };
+  });
+  table("adminPerformance", rows, ["Admin", "Assigned", "Follow-ups", "Pending", "Converted", "Ratio"], r => [r.name, r.assigned, r.followups, r.pending, r.converted, r.ratio]);
+}
+
+function renderFilters() {
+  buildFilters("leadFilters", "lead");
+  buildFilters("followupFilters", "followup");
+  buildFilters("reportFilters", "report");
+}
+function buildFilters(containerId, prefix) {
+  const currentValues = {};
+  ["course", "branch", "source", "status", "assignedTo"].forEach(key => {
+    const el = document.getElementById(`${prefix}-${key}`);
+    if (el) currentValues[key] = el.value;
+  });
+  const html = [
+    selectFilter(prefix, "course", "Course", masters.courses),
+    selectFilter(prefix, "branch", "Branch", masters.branches),
+    selectFilter(prefix, "source", "Reference", masters.sources),
+    selectFilter(prefix, "status", "Lead status", masters.statuses),
+    selectFilter(prefix, "assignedTo", "Admin", state.users.map(u => u.name)),
+    `<button data-clear-filters="${prefix}">Clear</button>`
+  ].join("");
+  const el = document.getElementById(containerId);
+  if (el) {
+    el.innerHTML = html;
+    Object.entries(currentValues).forEach(([key, value]) => {
+      const input = document.getElementById(`${prefix}-${key}`);
+      if (input && [...input.options].some(option => option.value === value)) input.value = value;
+    });
+    if (!el.dataset.ready) {
+      el.dataset.ready = "1";
+      el.addEventListener("change", render);
+    }
+  }
+}
+function selectFilter(prefix, key, label, values) {
+  return `<select id="${prefix}-${key}"><option value="">${label}</option>${values.map(v => `<option>${v}</option>`).join("")}</select>`;
+}
+
+function renderLeadTable() {
+  const leads = filteredLeads("lead");
+  table("leadTable", leads, ["Added On", "Lead Age", "Last Touched", "Name", "Mobile", "Course", "Attempt", "Branch", "Lead Source", "Reference", "Ref. Details", "Status", "Admin", "Next follow-up", "Actions"], l => [
+    leadCreatedStamp(l),
+    leadAge(l),
+    untouchedLabel(l),
+    displayLeadName(l),
+    l.studentMobile,
+    l.course,
+    l.attempt || "",
+    l.branch,
+    l.leadSource || "",
+    l.source,
+    referenceDetails(l),
+    statusText(l.status),
+    l.assignedTo,
+    dueLabel(l),
+    actionButtons(l)
+  ]);
+}
+
+function renderArchive() {
+  table("archiveTable", archivedLeads(), ["Name", "Mobile", "Course", "Archived on", "Archived by", "Actions"], l => [
+    displayLeadName(l),
+    l.studentMobile,
+    l.course,
+    formatDate(l.archivedAt),
+    l.archivedBy || "Admin",
+    `<button data-restore-lead="${l.id}">Restore</button> <button data-permanent-delete="${l.id}" class="danger-btn">Permanent Delete</button>`
+  ]);
+}
+
+function renderFollowups() {
+  const leads = filteredLeads("followup").filter(l => l.followupAt);
+  table("followupTable", leads, ["Student", "Mobile", "Course", "Branch", "Admin", "Follow-up", "Status", "Latest remark", "Actions"], l => [
+    displayLeadName(l), l.studentMobile, l.course, l.branch, l.assignedTo, dueLabel(l), statusText(l.status), l.remarks || "", `<button data-followup="${l.id}">Update</button> <button data-wa="${l.id}">WhatsApp</button>`
+  ]);
+}
+
+function renderAdmissions() {
+  table("admissionTable", admissionsWithLead(), ["Student", "Mobile", "Course", "Batch", "Admission date", "Fees", "Paid", "Balance", "Mode", "Receipt", "Counsellor"], r => [
+    displayLeadName(r), r.studentMobile, r.course, r.batch, r.admissionDate, money(r.feesAgreed), money(r.feesPaid), money(r.balance), r.paymentMode, r.receiptNumber, r.counsellor
+  ]);
+}
+function admissionsWithLead() {
+  return state.admissions
+    .map(a => ({ ...state.leads.find(l => l.id === a.leadId), ...a, balance: Number(a.feesAgreed || 0) - Number(a.feesPaid || 0) }))
+    .filter(row => !row.archivedAt);
+}
+
+function renderTemplates() {
+  document.getElementById("templateList").innerHTML = state.templates.map(t => `<div class="panel"><strong>${t.name}</strong><p class="muted">${t.course} | ${t.stage}</p><p>${t.message}</p></div>`).join("");
+}
+
+function renderReports() {
+  const leads = filteredLeads("report");
+  const converted = leads.filter(l => l.status === "Converted / Admitted").length;
+  document.getElementById("reportSummary").innerHTML = [
+    metric("Total lead count", leads.length),
+    metric("Conversion count", converted),
+    metric("Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"),
+    metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length)
+  ].join("");
+  renderGroupReport("sourceReport", leads, "source");
+  renderGroupReport("branchReport", leads, "branch");
+}
+function renderGroupReport(idName, leads, key) {
+  const rows = Object.entries(countBy(leads, key)).map(([name, total]) => {
+    const group = leads.filter(l => (l[key] || "Blank") === name);
+    const converted = group.filter(l => l.status === "Converted / Admitted").length;
+    return { name, total, converted, ratio: total ? `${Math.round(converted / total * 100)}%` : "0%" };
+  });
+  table(idName, rows, ["Name", "Leads", "Converted", "Ratio"], r => [r.name, r.total, r.converted, r.ratio]);
+}
+
+function renderUsers() {
+  table("userList", state.users, ["Name", "Mobile", "Email", "Role", "Branch", "Login", "Actions"], u => [
+    u.name,
+    u.mobile,
+    u.email,
+    u.role,
+    u.branch,
+    "First name / mobile / email",
+    `<button data-edit-user="${u.id}">Edit</button>`
+  ]);
+}
+
+function renderSettingsUsers() {
+  table("settingsUserList", state.users, ["Name", "Role", "Branch", "Login", "Actions"], u => [
+    u.name,
+    u.role,
+    u.branch,
+    "First name / mobile / email",
+    `<button data-edit-settings-user="${u.id}">Edit</button>`
+  ]);
+}
+
+function renderSettings() {
+  const groups = [
+    ["courses", "Courses"],
+    ["branches", "Locations / Branches"],
+    ["statuses", "Lead Status Options"],
+    ["roles", "Roles"],
+    ["batches", "Batches"]
+  ];
+  document.getElementById("settingsGrid").innerHTML = `
+    ${groups.map(([key, title]) => renderMasterEditor(key, title)).join("")}
+    <section class="panel">
+      <h2>Add Admin / User</h2>
+      <form id="settingsUserForm" class="form-grid">
+        <input type="hidden" name="id">
+        <input name="name" placeholder="Admin name" required>
+        <input name="mobile" placeholder="Mobile">
+        <input name="email" placeholder="Email">
+        <input name="password" placeholder="Password / PIN">
+        <select name="role">${masters.roles.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
+        <select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
+        <button class="primary">Save Admin</button>
+      </form>
+      <div id="settingsUserList" class="table-wrap"></div>
+    </section>
+    <section class="panel">
+      <h2>Data Backup</h2>
+      <p class="bulk-help">Export all CRM data before major changes, and restore it on the same or another browser when needed.</p>
+      <div class="toolbar">
+        <button data-backup-data type="button">Export Backup</button>
+        <button data-restore-data type="button">Restore Backup</button>
+        <input id="restoreDataFile" class="hidden" type="file" accept="application/json,.json">
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Google Sheet Database</h2>
+      <p class="bulk-help">Paste your deployed Google Apps Script Web App URL. Auto sync loads from Google Sheet on app open and saves changes after edits.</p>
+      <div class="form-grid">
+        <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL">
+        <label><input id="autoSheetSync" type="checkbox"> Auto load and auto save</label>
+      </div>
+      <div class="toolbar">
+        <button data-save-sheet-settings type="button">Save Sync Settings</button>
+        <button data-load-from-sheet type="button">Load From Sheet</button>
+        <button data-save-to-sheet type="button">Save To Sheet</button>
+      </div>
+      <p id="sheetSyncStatus" class="bulk-help"></p>
+    </section>`;
+
+  bindSettingsForms();
+  renderSettingsUsers();
+  renderSheetSyncSettings();
+}
+
+function renderMasterEditor(key, title) {
+  return `<section class="panel">
+    <h2>${title}</h2>
+    <div class="setting-list">
+      ${masters[key].map((value, index) => `
+        <span class="pill">
+          ${escapeHtml(value)}
+          <button class="pill-remove" data-delete-master="${key}:${index}" type="button" title="Remove">x</button>
+        </span>`).join("")}
+    </div>
+    <div class="setting-list">
+      ${defaultMasters[key].filter(value => !masters[key].includes(value)).map(value => `<button data-add-suggestion="${key}:${escapeAttr(value)}" type="button">${escapeHtml(value)}</button>`).join("")}
+    </div>
+    <form class="form-grid" data-master-form="${key}">
+      <input name="value" placeholder="Add ${title.toLowerCase()}" required>
+      <button class="primary">Add</button>
+    </form>
+  </section>`;
+}
+
+function withUnassigned(values) {
+  return ["Unassigned", ...values.filter(v => v !== "Unassigned")];
+}
+
+function getSheetSyncSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(`${storeKey}.sheetSync`) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function setSheetSyncSettings(settings) {
+  localStorage.setItem(`${storeKey}.sheetSync`, JSON.stringify(settings));
+}
+
+function renderSheetSyncSettings() {
+  const settings = getSheetSyncSettings();
+  const url = document.getElementById("sheetWebAppUrl");
+  const auto = document.getElementById("autoSheetSync");
+  if (url) url.value = settings.url || "";
+  if (auto) auto.checked = Boolean(settings.auto);
+  setSheetStatus(settings.url ? "Google Sheet sync configured." : "Google Sheet sync not configured yet.");
+}
+
+function saveSheetSyncSettings() {
+  const url = document.getElementById("sheetWebAppUrl")?.value.trim() || "";
+  const auto = Boolean(document.getElementById("autoSheetSync")?.checked);
+  setSheetSyncSettings({ url, auto });
+  setSheetStatus(auto && url ? "Auto sync enabled." : "Sync settings saved.");
+}
+
+function setSheetStatus(message) {
+  const status = document.getElementById("sheetSyncStatus");
+  if (status) status.textContent = message || "";
+}
+
+function queueCloudSave() {
+  const settings = getSheetSyncSettings();
+  if (!settings.auto || !settings.url || isCloudLoading) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => saveToSheet({ silent: true }), 1200);
+}
+
+function saveToSheet({ silent = false } = {}) {
+  const settings = getSheetSyncSettings();
+  if (!settings.url) {
+    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.");
+    return;
+  }
+  if (!silent) setSheetStatus("Saving to Google Sheet...");
+  const body = new URLSearchParams();
+  body.set("mode", "save");
+  body.set("payload", JSON.stringify(state));
+  fetch(settings.url, { method: "POST", mode: "no-cors", body })
+    .then(() => {
+      localStorage.setItem(`${storeKey}.lastCloudSave`, new Date().toISOString());
+      if (!silent) setSheetStatus("Saved to Google Sheet.");
+    })
+    .catch(() => {
+      if (!silent) setSheetStatus("Save failed. Check Web App URL and sharing permissions.");
+    });
+}
+
+function loadFromSheet({ silent = false } = {}) {
+  const settings = getSheetSyncSettings();
+  if (!settings.url) {
+    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.");
+    return;
+  }
+  const callbackName = `crmSheetLoad_${Date.now()}`;
+  if (!silent) setSheetStatus("Loading from Google Sheet...");
+  window[callbackName] = payload => {
+    try {
+      if (payload?.data) {
+        isCloudLoading = true;
+        state = payload.data;
+        masters = state.masters || masters;
+        localStorage.setItem(storeKey, JSON.stringify(state));
+        isCloudLoading = false;
+        loadCurrentUser();
+        render();
+        setSheetStatus("Loaded from Google Sheet.");
+      } else if (!silent) {
+        setSheetStatus("Google Sheet is empty. Save current data to initialize it.");
+      }
+    } catch {
+      setSheetStatus("Could not load Google Sheet data.");
+    } finally {
+      delete window[callbackName];
+      document.getElementById(callbackName)?.remove();
+    }
+  };
+  const script = document.createElement("script");
+  script.id = callbackName;
+  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=load&callback=${callbackName}&t=${Date.now()}`;
+  script.onerror = () => {
+    if (!silent) setSheetStatus("Load failed. Check Web App URL deployment access.");
+    delete window[callbackName];
+    script.remove();
+  };
+  document.body.appendChild(script);
+}
+
+function getThemeSetting() {
+  return localStorage.getItem(`${storeKey}.theme`) || "system";
+}
+
+function setTheme(theme) {
+  localStorage.setItem(`${storeKey}.theme`, theme);
+  applyTheme(theme);
+}
+
+function applyTheme(theme) {
+  const select = document.getElementById("themeSelect");
+  if (select) select.value = theme;
+  document.body.dataset.theme = theme;
+}
+
+function bindSettingsForms() {
+  document.querySelectorAll("[data-master-form]").forEach(form => {
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      const key = form.dataset.masterForm;
+      const value = new FormData(form).get("value").trim();
+      if (!value || masters[key].includes(value)) return;
+      masters[key].push(value);
+      save();
+      render();
+    });
+  });
+  document.getElementById("settingsUserForm")?.addEventListener("submit", saveUser);
+  document.getElementById("targetForm")?.addEventListener("submit", saveTarget);
+}
+
+function editMasterValue(key, index) {
+  const oldValue = masters[key][index];
+  const value = prompt(`Edit ${oldValue}`, oldValue);
+  if (!value || value === oldValue) return;
+  masters[key][index] = value.trim();
+  updateExistingRecordsForMaster(key, oldValue, value.trim());
+  save();
+  render();
+}
+
+function deleteMasterValue(key, index) {
+  const value = masters[key][index];
+  if (!confirm(`Delete "${value}" from master settings? Existing records will keep their current text.`)) return;
+  masters[key].splice(index, 1);
+  save();
+  render();
+}
+
+function updateExistingRecordsForMaster(key, oldValue, newValue) {
+  const leadField = { courses: "course", branches: "branch", sources: "source", statuses: "status", roles: "role" }[key];
+  if (leadField) state.leads.forEach(lead => { if (lead[leadField] === oldValue) lead[leadField] = newValue; });
+  if (key === "branches") state.users.forEach(user => { if (user.branch === oldValue) user.branch = newValue; });
+  if (key === "roles") state.users.forEach(user => { if (user.role === oldValue) user.role = newValue; });
+  if (key === "courses") {
+    state.templates.forEach(template => { if (template.course === oldValue) template.course = newValue; });
+    state.admissions.forEach(admission => { if (admission.course === oldValue) admission.course = newValue; });
+  }
+  if (key === "statuses") state.templates.forEach(template => { if (template.stage === oldValue) template.stage = newValue; });
+  state.targets.forEach(target => {
+    if (key === "courses" && target.course === oldValue) target.course = newValue;
+    if (key === "branches" && target.branch === oldValue) target.branch = newValue;
+  });
+}
+
+function saveTarget(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  state.targets.unshift({ id: id(), ...data, target: Number(data.target), createdAt: todayDate() });
+  save();
+  e.target.reset();
+  render();
+}
+
+function renderTargetSettings() {
+  table("targetSettingsTable", state.targets, ["Branch", "Course", "Attempt", "Period", "Target", "Actions"], t => [
+    t.branch,
+    t.course,
+    t.attempt,
+    t.period,
+    t.target,
+    `<button data-delete-target="${t.id}" type="button">Delete</button>`
+  ]);
+}
+
+function renderTargetProgress(containerId) {
+  const rows = state.targets.map(target => {
+    const actual = admissionsForTarget(target).length;
+    const ratio = target.target ? Math.round(actual / Number(target.target) * 100) : 0;
+    return { ...target, actual, balance: Math.max(0, Number(target.target) - actual), ratio: `${ratio}%` };
+  });
+  table(containerId, rows, ["Branch", "Course", "Attempt", "Period", "Target", "Actual", "Balance", "Progress"], r => [
+    r.branch, r.course, r.attempt, r.period, r.target, r.actual, r.balance, r.ratio
+  ]);
+}
+
+function admissionsForTarget(target) {
+  const now = new Date();
+  return admissionsWithLead().filter(row => {
+    const admittedAt = row.admissionDate ? new Date(row.admissionDate) : null;
+    return row.branch === target.branch
+      && row.course === target.course
+      && (row.attempt || "").toLowerCase() === target.attempt.toLowerCase()
+      && admittedAt
+      && isWithinTargetPeriod(admittedAt, now, target.period);
+  });
+}
+
+function isWithinTargetPeriod(date, now, period) {
+  if (period === "Monthly") return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  const start = new Date(now);
+  start.setDate(now.getDate() - now.getDay());
+  start.setHours(0, 0, 0, 0);
+  return date >= start && date <= now;
+}
+
+function saveTargetPlan(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const rows = data.branchTargets.split(/\n+/).map(line => {
+    const parts = line.split(/,|\t/).map(part => part.trim()).filter(Boolean);
+    if (parts.length < 2) return null;
+    if (parts.length >= 3) return { branch: parts[0], currentBase: Number(parts[1]) || 0, target: Number(parts[2]) || 0 };
+    return { branch: parts[0], currentBase: 0, target: Number(parts[1]) || 0 };
+  }).filter(row => row && row.branch && row.target);
+
+  state.targets.unshift({
+    id: id(),
+    title: data.title,
+    course: data.course,
+    attempt: data.attempt,
+    rows,
+    createdAt: todayDate()
+  });
+  save();
+  e.target.reset();
+  render();
+}
+
+function renderTargetPlans() {
+  const container = document.getElementById("targetPlans");
+  if (!container) return;
+  if (!state.targets.length) {
+    container.innerHTML = "<section class='panel'><p class='muted'>No target plans yet. Create a plan using branch targets.</p></section>";
+    return;
+  }
+  container.innerHTML = state.targets.map(plan => renderTargetPlan(plan)).join("");
+}
+
+function renderTargetPlan(plan) {
+  const rows = plan.rows.map(row => {
+    const crmCurrent = currentAdmissionsFor(row.branch, plan.course, plan.attempt);
+    const current = Number(row.currentBase || 0) + crmCurrent;
+    const achieved = row.target ? Math.round(current / row.target * 100) : 0;
+    const balance = Math.max(0, Number(row.target || 0) - current);
+    return { ...row, crmCurrent, current, achieved, balance };
+  }).sort((a, b) => b.achieved - a.achieved || b.current - a.current);
+  const totals = rows.reduce((acc, row) => {
+    acc.current += row.current;
+    acc.target += row.target;
+    acc.crmCurrent += row.crmCurrent;
+    return acc;
+  }, { current: 0, target: 0, crmCurrent: 0 });
+
+  return `<section class="panel">
+    <div class="target-head">
+      <div>
+        <h2>${escapeHtml(plan.title)}</h2>
+        <p class="muted">${escapeHtml(plan.course)} | ${escapeHtml(plan.attempt)}</p>
+      </div>
+      <button data-delete-target="${plan.id}" class="danger-btn" type="button">Delete Plan</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th><th>Branch</th><th>Current</th><th>CRM Adds</th><th>Target</th><th>Balance</th><th>% Achieved</th><th>Progress</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row, index) => `<tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(row.branch)}</td>
+            <td>${row.current}</td>
+            <td>${row.crmCurrent}</td>
+            <td>${row.target}</td>
+            <td>${row.balance}</td>
+            <td>${row.achieved}%</td>
+            <td>${targetProgressBar(row.achieved)}</td>
+          </tr>`).join("")}
+          <tr>
+            <th>Total</th><th></th><th>${totals.current}</th><th>${totals.crmCurrent}</th><th>${totals.target}</th><th>${Math.max(0, totals.target - totals.current)}</th><th>${totals.target ? Math.round(totals.current / totals.target * 100) : 0}%</th><th>${targetProgressBar(totals.target ? Math.round(totals.current / totals.target * 100) : 0)}</th>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function targetProgressBar(percent) {
+  const width = Math.min(100, Math.max(0, percent));
+  return `<div class="target-progress"><span style="width:${width}%"></span></div>`;
+}
+
+function currentAdmissionsFor(branch, course, attempt) {
+  return admissionsWithLead().filter(row =>
+    row.branch === branch &&
+    normalizeCourseName(row.course || "") === normalizeCourseName(course || "") &&
+    (row.attempt || "").toLowerCase() === (attempt || "").toLowerCase()
+  ).length;
+}
+
+function table(idName, rows, headings, mapRow) {
+  const target = document.getElementById(idName);
+  if (!target) return;
+  if (!rows.length) {
+    target.innerHTML = "<p class='muted'>No records found.</p>";
+    return;
+  }
+  target.innerHTML = `<table><thead><tr>${headings.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${mapRow(r).map(v => `<td>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function openLeadForm(lead) {
+  const form = document.getElementById("leadForm");
+  form.reset();
+  document.getElementById("duplicateWarning").classList.add("hidden");
+  document.getElementById("leadFormTitle").textContent = lead?.id ? "Edit Lead" : "Add Lead";
+  if (lead?.id) {
+    const prepared = prepareLeadForForm(lead);
+    Object.entries(prepared).forEach(([k, v]) => form.elements[k] && (form.elements[k].value = v || ""));
+  } else {
+    form.elements.enquiryDate.value = todayDate();
+    form.elements.followupAt.value = nextDayInputValue();
+    if (masters.statuses.includes("New Lead")) form.elements.status.value = "New Lead";
+  }
+  updateEducationFields();
+  updateReferenceFields();
+  document.getElementById("leadDialog").showModal();
+}
+
+function saveLead(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  data.firstName = titleCase(data.firstName || "");
+  data.lastName = titleCase(data.lastName || "");
+  data.studentName = [data.firstName, data.lastName].filter(Boolean).join(" ").trim();
+  data.source = data.newReference?.trim() || data.source || "";
+  if (data.newReference && !masters.sources.includes(data.newReference.trim())) {
+    masters.sources.push(data.newReference.trim());
+  }
+  data.createdAt = data.id ? data.createdAt || new Date().toISOString() : new Date().toISOString();
+  data.lastTouchedAt = data.id ? new Date().toISOString() : "";
+  data.lastTouchType = data.id ? "Edited" : "";
+  data.academicBackground = buildAcademicSummary(data);
+  data.currentQualification = data.educationLevel || "";
+  data.pastPerformance = [data.tenthPercent && `10th: ${data.tenthPercent}`, data.twelfthPercent && `12th: ${data.twelfthPercent}`, data.graduationPercent && `Graduation: ${data.graduationPercent}`].filter(Boolean).join(", ");
+  const duplicate = state.leads.find(l => l.studentMobile === data.studentMobile && l.id !== data.id);
+  if (duplicate && !confirm(`Duplicate mobile found for ${displayLeadName(duplicate)}. Save anyway?`)) return;
+  if (data.id) state.leads = state.leads.map(l => l.id === data.id ? { ...l, ...data } : l);
+  else state.leads.unshift({ ...data, id: id(), createdAt: new Date().toISOString(), lastTouchedAt: "", lastTouchType: "" });
+  save();
+  document.getElementById("leadDialog").close();
+  render();
+}
+
+function prepareLeadForForm(lead) {
+  const parts = displayLeadName(lead).split(" ");
+  return {
+    ...lead,
+    firstName: lead.firstName || parts.shift() || "",
+    lastName: lead.lastName || parts.join(" "),
+    enquiryDate: lead.enquiryDate || lead.createdAt || todayDate(),
+    followupAt: lead.followupAt || nextDayInputValue()
+  };
+}
+
+function updateEducationFields() {
+  const level = document.getElementById("educationLevel")?.value || "";
+  document.querySelectorAll(".edu-field").forEach(field => {
+    const allowed = field.dataset.edu.split(" ");
+    field.classList.toggle("hidden", !level || !allowed.includes(level));
+  });
+}
+
+function updateReferenceFields() {
+  const reference = document.getElementById("referenceType")?.value || "";
+  document.querySelectorAll(".reference-extra").forEach(field => {
+    const allowed = field.dataset.reference.split("|");
+    field.classList.toggle("hidden", !reference || !allowed.includes(reference));
+  });
+}
+
+function nextDayInputValue() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(11, 0, 0, 0);
+  return localInputValue(d);
+}
+
+function buildAcademicSummary(data) {
+  if (data.educationLevel === "10th") return `10th: ${data.tenthPercent || ""}${data.schoolName ? `, School: ${data.schoolName}` : ""}`.trim();
+  if (data.educationLevel === "12th") return `10th: ${data.tenthPercent || ""}, 12th: ${data.twelfthPercent || ""}${data.college ? `, College: ${data.college}` : ""}`.trim();
+  if (data.educationLevel === "Graduate") return `Graduate${data.graduationIn ? ` in ${data.graduationIn}` : ""}: ${data.graduationPercent || ""}${data.college ? `, College: ${data.college}` : ""}`.trim();
+  return "";
+}
+
+function openFollowup(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  const form = document.getElementById("followupForm");
+  form.reset();
+  form.elements.leadId.value = leadId;
+  form.elements.status.value = lead.status;
+  form.elements.nextFollowup.value = lead.followupAt || "";
+  document.getElementById("followupDialog").showModal();
+}
+function saveFollowup(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const lead = state.leads.find(l => l.id === data.leadId);
+  lead.status = data.status;
+  lead.followupAt = data.nextFollowup;
+  lead.remarks = data.remarks;
+  markLeadTouched(lead, "Follow-up");
+  state.followups.unshift({ id: id(), leadId: lead.id, at: data.nextFollowup, status: data.status, remarks: data.remarks, createdBy: lead.assignedTo, createdAt: new Date().toISOString() });
+  save();
+  document.getElementById("followupDialog").close();
+  render();
+}
+
+function openAdmission(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  const form = document.getElementById("admissionForm");
+  form.reset();
+  form.elements.leadId.value = leadId;
+  form.elements.admissionDate.value = todayDate();
+  form.elements.course.value = lead.course;
+  form.elements.counsellor.value = lead.assignedTo;
+  document.getElementById("admissionDialog").showModal();
+}
+function saveAdmission(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const lead = state.leads.find(l => l.id === data.leadId);
+  lead.status = "Converted / Admitted";
+  markLeadTouched(lead, "Admission");
+  state.admissions.unshift({ ...data, id: id() });
+  save();
+  document.getElementById("admissionDialog").close();
+  render();
+}
+
+function saveTemplate(e) {
+  e.preventDefault();
+  state.templates.unshift({ id: id(), ...Object.fromEntries(new FormData(e.target).entries()) });
+  save();
+  e.target.reset();
+  render();
+}
+function saveUser(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  data.id = data.id || "";
+  if (!data.password) data.password = firstNameOf(data.name);
+  if (!state.users.length && !data.id) data.role = "Super Admin";
+  if (data.id) {
+    state.users = state.users.map(user => user.id === data.id ? { ...user, ...data } : user);
+  } else {
+    delete data.id;
+    state.users.push({ id: id(), ...data });
+  }
+  save();
+  e.target.reset();
+  const title = document.getElementById("userFormTitle");
+  if (title) title.textContent = "Add User";
+  render();
+}
+
+function editUser(userId) {
+  const user = state.users.find(u => u.id === userId);
+  const form = document.getElementById("userForm");
+  if (!user || !form) return;
+  activeTab = "users";
+  render();
+  document.getElementById("userFormTitle").textContent = "Edit User";
+  Object.entries(user).forEach(([key, value]) => {
+    if (form.elements[key]) form.elements[key].value = value || "";
+  });
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function editSettingsUser(userId) {
+  const user = state.users.find(u => u.id === userId);
+  const form = document.getElementById("settingsUserForm");
+  if (!user || !form) return;
+  Object.entries(user).forEach(([key, value]) => {
+    if (form.elements[key]) form.elements[key].value = value || "";
+  });
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function parseBulk() {
+  const text = document.getElementById("bulkText").value;
+  parsedBulk = splitLeadBlocks(text).map(parseLeadBlock);
+  renderBulkPreview();
+}
+function saveBulk() {
+  collectBulkPreviewEdits();
+  state.leads.unshift(...parsedBulk.filter(r => !r.skip).map(({ duplicate, skip, rawText, ...lead }) => ({ ...lead, lastTouchedAt: "", lastTouchType: "" })));
+  save();
+  document.getElementById("bulkDialog").close();
+  document.getElementById("bulkText").value = "";
+  document.getElementById("bulkPreview").innerHTML = "";
+  parsedBulk = [];
+  render();
+}
+
+function splitLeadBlocks(text) {
+  const normalized = text.replace(/\r/g, "").trim();
+  if (!normalized) return [];
+  const paragraphBlocks = normalized.split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean);
+  if (paragraphBlocks.length > 1) return paragraphBlocks;
+
+  const lines = normalized.split("\n").map(l => l.trim()).filter(Boolean);
+  const blocks = [];
+  let current = [];
+  lines.forEach(line => {
+    if (current.length && /\b[6-9]\d{9}\b/.test(current.join(" "))) {
+      current.push(line);
+      blocks.push(current.join("\n"));
+      current = [];
+    } else {
+      current.push(line);
+    }
+  });
+  if (current.length) blocks.push(current.join("\n"));
+  return blocks.filter(block => /\b[6-9]\d{9}\b/.test(block) || looksLikeName(block));
+}
+
+function parseLeadBlock(block) {
+  const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+  const joined = lines.join(" ");
+  const email = (joined.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [""])[0];
+  const phones = joined.match(/\b[6-9]\d{9}\b/g) || [];
+  const studentMobile = phones[0] || "";
+  const nameLine = lines.find(line => looksLikeName(line)) || "";
+  const locationLine = lines.find(line => /(?:stay|stays|staying|live|lives|location|area|from|resident|resides)\s+(?:in|at)?/i.test(line)) || "";
+  const educationLine = lines.find(line => /(?:graduated|graduate|studying|class|qualification|baf|bcom|b\.com|hsc|ssc|commerce|college|school|ty|fy|sy)/i.test(line)) || "";
+  const course = detectCourse(joined);
+  const source = detectSource(joined);
+  const branch = detectBranch(joined, locationLine);
+  const attemptMatch = joined.match(/\b(June|December|Jun|Dec|J|D)\s*'?(\d{2}|20\d{2})\b/i);
+  const attempt = attemptMatch ? normalizeAttempt(attemptMatch[1], attemptMatch[2]) : "";
+  const location = cleanTaggedLine(locationLine, ["stay in", "stays in", "staying in", "live in", "lives in", "location", "area", "from", "resident of", "resides in"]);
+  const academicBackground = cleanTaggedLine(educationLine, ["graduated in", "graduate in", "studying", "qualification", "current education"]);
+
+  return {
+    id: id(),
+    studentName: titleCase(nameLine || inferName(joined)),
+    studentMobile,
+    parentMobile: phones[1] || "",
+    email,
+    location: titleCase(location),
+    branch,
+    course,
+    attempt,
+    academicBackground: academicBackground || "",
+    pastPerformance: "",
+    currentQualification: academicBackground || "",
+    college: "",
+    source,
+    assignedTo: state.users[0]?.name || "",
+    status: "New Lead",
+    followupAt: "",
+    createdAt: new Date().toISOString(),
+    lastTouchedAt: "",
+    lastTouchType: "",
+    remarks: block,
+    createdAt: todayDate(),
+    rawText: block,
+    duplicate: Boolean(studentMobile && state.leads.some(l => l.studentMobile === studentMobile))
+  };
+}
+
+function renderBulkPreview() {
+  const target = document.getElementById("bulkPreview");
+  if (!parsedBulk.length) {
+    target.innerHTML = "<p class='muted'>No student records detected. Keep each student in a separate paragraph or include one mobile number per student.</p>";
+    return;
+  }
+  target.innerHTML = `
+    <p class="bulk-help">Review and tag the detected information before saving. You can edit any field here.</p>
+    <table class="bulk-preview">
+      <thead>
+        <tr>
+          <th>Save</th><th>Name</th><th>Mobile</th><th>Location</th><th>Education</th><th>Course</th><th>Attempt</th><th>Branch</th><th>Source</th><th>Admin</th><th>Status</th><th>Tag message lines</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${parsedBulk.map((lead, index) => `
+          <tr data-bulk-row="${index}">
+            <td>
+              <input data-field="skip" type="checkbox" ${lead.duplicate ? "" : "checked"}>
+              <div>${lead.duplicate ? "<span class='danger'>Duplicate</span>" : "<span class='ok'>New</span>"}</div>
+            </td>
+            <td><input data-field="studentName" value="${escapeAttr(lead.studentName)}"></td>
+            <td><input data-field="studentMobile" value="${escapeAttr(lead.studentMobile)}"></td>
+            <td><input data-field="location" value="${escapeAttr(lead.location)}"></td>
+            <td><input data-field="academicBackground" value="${escapeAttr(lead.academicBackground)}"></td>
+            <td>${bulkSelect("course", masters.courses, lead.course)}</td>
+            <td><input data-field="attempt" value="${escapeAttr(lead.attempt)}" placeholder="June 2027"></td>
+            <td>${bulkSelect("branch", masters.branches, lead.branch)}</td>
+            <td>${bulkSelect("source", masters.sources, lead.source)}</td>
+            <td>${bulkSelect("assignedTo", state.users.map(u => u.name), lead.assignedTo)}</td>
+            <td>${bulkSelect("status", masters.statuses, lead.status)}</td>
+            <td class="raw-cell">
+              ${renderLineTagger(lead, index)}
+              <button data-apply-tags="${index}" type="button">Apply Tags</button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>`;
+}
+
+function collectBulkPreviewEdits() {
+  document.querySelectorAll("[data-bulk-row]").forEach(row => {
+    const lead = parsedBulk[Number(row.dataset.bulkRow)];
+    row.querySelectorAll("[data-field]").forEach(input => {
+      if (input.dataset.field === "skip") {
+        lead.skip = !input.checked;
+      } else {
+        lead[input.dataset.field] = input.value.trim();
+      }
+    });
+    lead.currentQualification = lead.academicBackground;
+    lead.remarks = lead.rawText;
+    lead.duplicate = Boolean(lead.studentMobile && state.leads.some(l => l.studentMobile === lead.studentMobile));
+  });
+}
+
+function renderLineTagger(lead, index) {
+  const options = [
+    ["", "Ignore"],
+    ["studentName", "Student name"],
+    ["studentMobile", "Student mobile"],
+    ["parentMobile", "Parent mobile"],
+    ["email", "Email"],
+    ["location", "Location / area"],
+    ["academicBackground", "Education"],
+    ["currentQualification", "Qualification"],
+    ["college", "College / school"],
+    ["course", "Course"],
+    ["attempt", "Attempt"],
+    ["branch", "Branch"],
+    ["source", "Lead source"],
+    ["remarks", "Remarks"]
+  ];
+  return `<div class="line-tagger">
+    ${lead.rawText.split("\n").map((line, lineIndex) => {
+      const guessed = guessFieldForLine(line, lead);
+      return `<label class="tag-line">
+        <span>${escapeHtml(line)}</span>
+        <select data-line-tag="${index}-${lineIndex}">
+          ${options.map(([value, label]) => `<option value="${value}" ${value === guessed ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </label>`;
+    }).join("")}
+  </div>`;
+}
+
+function guessFieldForLine(line, lead) {
+  const clean = line.trim();
+  if (!clean) return "";
+  if (clean === lead.studentName) return "studentName";
+  if (clean.includes(lead.studentMobile)) return "studentMobile";
+  if (lead.parentMobile && clean.includes(lead.parentMobile)) return "parentMobile";
+  if (lead.email && clean.includes(lead.email)) return "email";
+  if (/stay|stays|staying|live|lives|location|area|from|resident|resides/i.test(clean)) return "location";
+  if (/graduated|graduate|studying|class|qualification|baf|bcom|b\.com|hsc|ssc|commerce|college|school|ty|fy|sy/i.test(clean)) return "academicBackground";
+  if (/\b(cmai|cmaf|cma\s*i|cma\s*f|foundation|inter|intermediate|final)\b/i.test(clean)) return "course";
+  if (/\b(June|December|Jun|Dec|J|D)\s*'?(\d{2}|20\d{2})\b/i.test(clean)) return "attempt";
+  if (masters.sources.some(s => clean.toLowerCase().includes(s.split(" ")[0].toLowerCase()))) return "source";
+  if (masters.branches.some(b => clean.toLowerCase().includes(b.toLowerCase()))) return "branch";
+  if (looksLikeName(clean)) return "studentName";
+  return "remarks";
+}
+
+function applyLineTags(index) {
+  const lead = parsedBulk[index];
+  if (!lead) return;
+  const fieldsFromTags = {};
+  const remarks = [];
+  lead.rawText.split("\n").forEach((line, lineIndex) => {
+    const field = document.querySelector(`[data-line-tag="${index}-${lineIndex}"]`)?.value;
+    if (!field) return;
+    const value = normalizeTaggedValue(field, line);
+    if (field === "remarks") {
+      remarks.push(line.trim());
+    } else if (fieldsFromTags[field]) {
+      fieldsFromTags[field] = `${fieldsFromTags[field]} ${value}`.trim();
+    } else {
+      fieldsFromTags[field] = value;
+    }
+  });
+
+  Object.entries(fieldsFromTags).forEach(([field, value]) => {
+    const input = document.querySelector(`[data-bulk-row="${index}"] [data-field="${field}"]`);
+    if (input) input.value = value;
+    lead[field] = value;
+  });
+  if (remarks.length) lead.remarks = remarks.join("\n");
+}
+
+function normalizeTaggedValue(field, line) {
+  const clean = line.trim();
+  if (field === "studentMobile" || field === "parentMobile") return (clean.match(/\b[6-9]\d{9}\b/) || [clean])[0];
+  if (field === "email") return (clean.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [clean])[0];
+  if (field === "location") return cleanTaggedLine(clean, ["stay in", "stays in", "staying in", "live in", "lives in", "location", "area", "from", "resident of", "resides in"]);
+  if (field === "academicBackground" || field === "currentQualification") return cleanTaggedLine(clean, ["graduated in", "graduate in", "studying", "qualification", "current education"]);
+  if (field === "course") return detectCourse(clean);
+  if (field === "branch") return detectBranch(clean, clean);
+  if (field === "source") return detectSource(clean);
+  const attemptMatch = clean.match(/\b(June|December|Jun|Dec|J|D)\s*'?(\d{2}|20\d{2})\b/i);
+  if (field === "attempt" && attemptMatch) return normalizeAttempt(attemptMatch[1], attemptMatch[2]);
+  return field === "studentName" ? titleCase(clean) : clean;
+}
+
+function bulkSelect(field, options, selected) {
+  return `<select data-field="${field}">${options.map(v => `<option ${v === selected ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
+}
+
+function looksLikeName(line) {
+  const clean = line.replace(/\b[6-9]\d{9}\b/g, "").trim();
+  if (!clean || clean.length > 45) return false;
+  if (/@|enquiry|details|explained|desk|cmai|course|fees|prospectus/i.test(clean)) return false;
+  if (/stay|graduated|studying|class|location|area|mobile|phone|number/i.test(clean)) return false;
+  return /^[a-z .'-]{3,}$/i.test(clean) && clean.split(/\s+/).length <= 4;
+}
+
+function inferName(text) {
+  return text
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig, "")
+    .replace(/\b[6-9]\d{9}\b/g, "")
+    .split(/\n|,|\|/)
+    .map(l => l.trim())
+    .find(looksLikeName) || "Unknown Student";
+}
+
+function cleanTaggedLine(line, prefixes) {
+  if (!line) return "";
+  let value = line;
+  prefixes.forEach(prefix => {
+    value = value.replace(new RegExp(`^${prefix}\\s*`, "i"), "");
+  });
+  return smartTitleCase(value.replace(/^in\s+/i, "").trim());
+}
+
+function detectCourse(text) {
+  const lower = text.toLowerCase();
+  if (/\bcmai\b|\bcma\s*i\b|\binter\b|\bintermediate\b/.test(lower)) return preferredCourseName("CMA Intermediate");
+  if (/\bcmaf\b|\bcma\s*f\b|\bfoundation\b|\bfoun\b/.test(lower)) return preferredCourseName("CMA Foundation");
+  if (/\bcmafinal\b|\bcma\s*final\b|\bfinal\b/.test(lower)) return preferredCourseName("CMA Final");
+  return masters.courses[0] || "";
+}
+
+function preferredCourseName(defaultName) {
+  const normalizedDefault = normalizeCourseName(defaultName);
+  return masters.courses.find(course => normalizeCourseName(course) === normalizedDefault) || defaultName;
+}
+
+function normalizeCourseName(name) {
+  const lower = name.toLowerCase();
+  if (lower.includes("inter")) return "cma intermediate";
+  if (lower.includes("foundation")) return "cma foundation";
+  if (lower.includes("final")) return "cma final";
+  return lower.trim();
+}
+
+function detectSource(text) {
+  const lower = text.toLowerCase();
+  if (/desk/.test(lower)) return "Walk-in";
+  return masters.sources.find(s => lower.includes(s.split(" ")[0].toLowerCase())) || "Raw data calling";
+}
+
+function detectBranch(text, locationLine) {
+  const combined = `${locationLine} ${text}`.toLowerCase();
+  return masters.branches.find(b => combined.includes(b.toLowerCase())) || "Online";
+}
+
+function normalizeAttempt(month, year) {
+  const fullMonth = /^d/i.test(month) ? "December" : "June";
+  const fullYear = year.length === 2 ? `20${year}` : year;
+  return `${fullMonth} ${fullYear}`;
+}
+
+function routeActions(e) {
+  const button = e.target.closest("button");
+  if (!button) return;
+  if (button.dataset.edit) openLeadForm(state.leads.find(l => l.id === button.dataset.edit));
+  if (button.dataset.followup) openFollowup(button.dataset.followup);
+  if (button.dataset.admit) openAdmission(button.dataset.admit);
+  if (button.dataset.wa) sendWhatsApp(button.dataset.wa);
+  if (button.dataset.archiveLead) archiveLead(button.dataset.archiveLead);
+  if (button.dataset.restoreLead) restoreLead(button.dataset.restoreLead);
+  if (button.dataset.permanentDelete) permanentlyDeleteLead(button.dataset.permanentDelete);
+  if (button.dataset.editUser) editUser(button.dataset.editUser);
+  if (button.dataset.editSettingsUser) editSettingsUser(button.dataset.editSettingsUser);
+  if (button.dataset.applyTags) applyLineTags(Number(button.dataset.applyTags));
+  if (button.dataset.editMaster) {
+    const [key, index] = button.dataset.editMaster.split(":");
+    editMasterValue(key, Number(index));
+  }
+  if (button.dataset.deleteMaster) {
+    const [key, index] = button.dataset.deleteMaster.split(":");
+    deleteMasterValue(key, Number(index));
+  }
+  if (button.dataset.addSuggestion) {
+    const separator = button.dataset.addSuggestion.indexOf(":");
+    const key = button.dataset.addSuggestion.slice(0, separator);
+    const value = button.dataset.addSuggestion.slice(separator + 1);
+    if (value && !masters[key].includes(value)) {
+      masters[key].push(value);
+      save();
+      render();
+    }
+  }
+  if (button.dataset.backupData !== undefined) downloadDataBackup();
+  if (button.dataset.restoreData !== undefined) document.getElementById("restoreDataFile")?.click();
+  if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
+  if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
+  if (button.dataset.saveToSheet !== undefined) saveToSheet();
+  if (button.dataset.deleteTarget) {
+    state.targets = state.targets.filter(t => t.id !== button.dataset.deleteTarget);
+    save();
+    render();
+  }
+  if (button.dataset.clearFilters) {
+    document.querySelectorAll(`[id^="${button.dataset.clearFilters}-"]`).forEach(el => el.value = "");
+    render();
+  }
+}
+
+function routeSelectActions(e) {
+  if (e.target.id === "restoreDataFile") {
+    restoreDataBackup(e.target.files?.[0]);
+    e.target.value = "";
+    return;
+  }
+  const select = e.target.closest("[data-row-action]");
+  if (!select || !select.value) return;
+  const leadId = select.dataset.rowAction;
+  const action = select.value;
+  const lead = state.leads.find(l => l.id === leadId);
+  select.value = "";
+  if (!lead) return;
+  if (action === "assignBranch" && !canAssignLead()) {
+    alert("Only Lead Manager or Super Admin can assign leads.");
+    return;
+  }
+  if (action !== "assignBranch" && !canActOnLead(lead)) {
+    alert("You can view this lead, but you can act only after Lead Manager assigns it to you.");
+    return;
+  }
+  if (action === "edit") openLeadForm(lead);
+  if (action === "followup") openFollowup(leadId);
+  if (action === "wa") sendWhatsApp(leadId);
+  if (action === "admit") openAdmission(leadId);
+  if (action === "assignBranch") assignLeadBranch(leadId);
+  if (action === "assignAdmin") assignLeadAdmin(leadId);
+  if (action === "archive") archiveLead(leadId);
+}
+
+function assignLeadBranch(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  const choices = withUnassigned(masters.branches);
+  const branch = prompt(`Assign branch for ${displayLeadName(lead)}:\n${choices.join(", ")}`, lead.branch || "Unassigned");
+  if (!branch) return;
+  const cleanBranch = branch.trim();
+  if (!masters.branches.includes(cleanBranch) && cleanBranch !== "Unassigned") {
+    masters.branches.push(cleanBranch);
+  }
+  lead.branch = cleanBranch;
+  markLeadTouched(lead, "Branch Assigned");
+  save();
+  render();
+}
+
+function assignLeadAdmin(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  if (!state.users.length) {
+    alert("Please add admins/counsellors in Users / Admins first.");
+    return;
+  }
+  const form = document.getElementById("assignAdminForm");
+  form.reset();
+  fillSelects("assignedTo", state.users.map(user => user.name));
+  form.elements.leadId.value = leadId;
+  form.elements.assignedTo.value = lead.assignedTo || state.users[0]?.name || "";
+  document.getElementById("assignAdminDialog").showModal();
+}
+
+function saveAdminAssignment(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const lead = state.leads.find(l => l.id === data.leadId);
+  if (!lead) return;
+  lead.assignedTo = data.assignedTo;
+  if (data.assignmentComment) {
+    const stamp = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    lead.remarks = [lead.remarks, `[${stamp}] Assigned to ${data.assignedTo}: ${data.assignmentComment}`].filter(Boolean).join("\n");
+  }
+  markLeadTouched(lead, "Admin Assigned");
+  save();
+  document.getElementById("assignAdminDialog").close();
+  render();
+}
+
+function downloadDataBackup() {
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    app: "CMA Admission CRM",
+    version: 1,
+    data: state
+  };
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
+  a.download = `cma-crm-backup-${stamp}.json`;
+  a.click();
+}
+
+function restoreDataBackup(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const data = parsed.data || parsed;
+      if (!data || !Array.isArray(data.leads) || !data.masters) throw new Error("Invalid backup file");
+      if (!confirm("Restore this backup? Current browser CRM data will be replaced.")) return;
+      state = data;
+      masters = state.masters;
+      save();
+      currentUser = null;
+      localStorage.removeItem(`${storeKey}.currentUserId`);
+      loadCurrentUser();
+      render();
+      alert("Backup restored successfully.");
+    } catch (error) {
+      alert("Could not restore backup. Please choose a valid CMA CRM backup file.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+function sendWhatsApp(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  const template = state.templates.find(t => t.course === lead.course) || state.templates[0];
+  const user = state.users.find(u => u.name === lead.assignedTo);
+  const msg = (template?.message || "Hello {{student_name}}, thank you for your interest in {{course_name}}.")
+    .replaceAll("{{student_name}}", displayLeadName(lead))
+    .replaceAll("{{course_name}}", lead.course)
+    .replaceAll("{{attempt}}", lead.attempt || "")
+    .replaceAll("{{branch_name}}", lead.branch || "")
+    .replaceAll("{{counsellor_name}}", user?.name || lead.assignedTo || "");
+  markLeadTouched(lead, "WhatsApp");
+  save();
+  render();
+  window.open(`https://wa.me/91${lead.studentMobile}?text=${encodeURIComponent(msg)}`, "_blank");
+}
+
+function actionButtons(l) {
+  const allowed = canActOnLead(l);
+  const assignAllowed = canAssignLead();
+  if (!allowed && !assignAllowed) return "<span class='locked-action'>View only</span>";
+  return `<select data-row-action="${l.id}">
+    <option value="">Action</option>
+    ${allowed ? `<option value="edit">Edit</option>
+    <option value="followup">Follow-up</option>
+    <option value="wa">WhatsApp</option>
+    <option value="admit">Admit</option>
+    <option value="archive">Delete</option>` : ""}
+    ${assignAllowed ? `<option value="assignAdmin">Assign Admin</option><option value="assignBranch">Assign Branch</option>` : ""}
+  </select>`;
+}
+
+function archiveLead(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!canActOnLead(lead)) {
+    alert("You can delete/archive only assigned leads.");
+    return;
+  }
+  if (!lead || !confirm(`Move ${displayLeadName(lead)} to archive?`)) return;
+  lead.archivedAt = new Date().toISOString();
+  lead.archivedBy = "Admin";
+  save();
+  render();
+}
+
+function restoreLead(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!canPermanentlyDelete()) {
+    alert("Only Lead Manager or Super Admin can restore archived leads.");
+    return;
+  }
+  if (!lead) return;
+  delete lead.archivedAt;
+  delete lead.archivedBy;
+  save();
+  render();
+}
+
+function permanentlyDeleteLead(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!canPermanentlyDelete()) {
+    alert("Only Lead Manager or Super Admin can permanently delete leads.");
+    return;
+  }
+  if (!lead || !confirm(`Permanently delete ${displayLeadName(lead)}? This cannot be undone.`)) return;
+  state.leads = state.leads.filter(l => l.id !== leadId);
+  state.followups = state.followups.filter(f => f.leadId !== leadId);
+  state.admissions = state.admissions.filter(a => a.leadId !== leadId);
+  save();
+  render();
+}
+function statusText(status) {
+  const cls = status === "Converted / Admitted" ? "ok" : status.includes("Lost") || status.includes("Not") ? "danger" : status.includes("Pending") || status.includes("Required") ? "warn" : "";
+  return `<span class="${cls}">${status}</span>`;
+}
+function isOverdue(l) { return l.followupAt && new Date(l.followupAt) < new Date() && l.status !== "Converted / Admitted"; }
+function dueToday(l) { return l.followupAt && l.followupAt.slice(0, 10) === todayDate(); }
+function dueLabel(l) {
+  if (!l.followupAt) return "";
+  const cls = isOverdue(l) ? "danger" : dueToday(l) ? "warn" : "";
+  return `<span class="${cls}">${formatDate(l.followupAt)}</span>`;
+}
+function formatDate(v) { return v ? new Date(v).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; }
+function money(v) { return v ? Number(v).toLocaleString("en-IN") : "0"; }
+function leadCreatedStamp(lead) {
+  return formatDate(lead.createdAt || lead.enquiryDate);
+}
+function referenceDetails(lead) {
+  if (lead.source === "Past Students" || lead.source === "Existing students") {
+    return [lead.referenceStudentName, lead.referenceStudentId && `ID: ${lead.referenceStudentId}`].filter(Boolean).join("<br>");
+  }
+  if (lead.source === "Classes Owner") {
+    return [lead.referenceClassName, lead.referenceClassLocation].filter(Boolean).join("<br>");
+  }
+  return "";
+}
+function markLeadTouched(lead, type) {
+  lead.lastTouchedAt = new Date().toISOString();
+  lead.lastTouchType = type;
+}
+
+function untouchedLeads(leads = activeLeads()) {
+  return leads
+    .filter(lead => lead.status !== "Converted / Admitted")
+    .filter(lead => !lead.lastTouchedAt || daysSince(lead.lastTouchedAt) >= 1)
+    .sort((a, b) => lastTouchTime(a) - lastTouchTime(b));
+}
+
+function untouchedLabel(lead) {
+  if (lead.status === "Converted / Admitted") return "<span class='ok'>Admitted</span>";
+  if (!lead.lastTouchedAt) return `<span class="danger">Never touched</span>`;
+  const days = daysSince(lead.lastTouchedAt);
+  const text = days === 0 ? "Today" : days === 1 ? "1 day ago" : `${days} days ago`;
+  const cls = days >= 3 ? "danger" : days >= 1 ? "warn" : "ok";
+  return `<span class="${cls}">${lead.lastTouchType || "Touched"}: ${text}</span>`;
+}
+
+function daysSince(value) {
+  const start = new Date(value);
+  const now = new Date();
+  start.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.floor((now - start) / 86400000));
+}
+
+function lastTouchTime(lead) {
+  return new Date(lead.lastTouchedAt || lead.enquiryDate || lead.createdAt || 0).getTime();
+}
+
+function leadAge(lead) {
+  const dateValue = lead.enquiryDate || lead.createdAt;
+  if (!dateValue) return "";
+  const start = new Date(dateValue);
+  const now = new Date();
+  start.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.floor((now - start) / 86400000));
+  if (days === 0) return "<span class='pill'>Today</span>";
+  if (days === 1) return "<span class='pill'>1 day</span>";
+  return `<span class='pill'>${days} days</span>`;
+}
+function displayLeadName(lead) {
+  return [lead?.firstName, lead?.lastName].filter(Boolean).join(" ").trim() || lead?.studentName || "";
+}
+function firstNameOf(name) {
+  return String(name || "").trim().split(/\s+/)[0] || "";
+}
+function titleCase(s) { return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
+function smartTitleCase(s) {
+  const acronyms = new Set(["BAF", "BCOM", "B.COM", "BMS", "HSC", "SSC", "CA", "CS", "CMA"]);
+  return String(s || "").split(/\s+/).map(word => {
+    const cleaned = word.replace(/[^\w.]/g, "").toUpperCase();
+    if (acronyms.has(cleaned)) return cleaned === "BCOM" ? "B.Com" : cleaned;
+    return titleCase(word);
+  }).join(" ");
+}
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+function escapeAttr(value) { return escapeHtml(value); }
+function exportCsv(filename, rows) {
+  if (!rows.length) return alert("No data to export.");
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(","), ...rows.map(r => headers.map(h => `"${String(r[h] ?? "").replaceAll('"', '""')}"`).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+}

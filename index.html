@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CMA Admission CRM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="loginScreen" class="login-screen">
+    <form id="loginForm" class="login-card">
+      <div class="brand login-brand">
+        <div class="brand-mark">CMA</div>
+        <div>
+          <strong>Admission CRM</strong>
+          <span>Secure staff login</span>
+        </div>
+      </div>
+      <h1>Login</h1>
+      <input name="loginId" placeholder="First name, mobile, or email" required>
+      <button class="primary">Login</button>
+      <p id="loginError" class="warning hidden"></p>
+      <p class="bulk-help">For now, login with first name, mobile, or email. No password required.</p>
+    </form>
+  </section>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">CMA</div>
+      <div>
+        <strong>Admission CRM</strong>
+        <span>Lead follow-up desk</span>
+      </div>
+    </div>
+    <nav id="tabs" class="tabs"></nav>
+  </aside>
+
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Education institute CRM</p>
+        <h1 id="pageTitle">Dashboard</h1>
+      </div>
+      <div class="top-actions">
+        <span id="currentUserBadge" class="user-badge"></span>
+        <select id="themeSelect" title="Theme">
+          <option value="system">System</option>
+          <option value="classic">Classic</option>
+          <option value="mint">Mint</option>
+          <option value="rose">Rose</option>
+          <option value="dark">Dark</option>
+        </select>
+        <input id="globalSearch" class="search" placeholder="Search name or mobile">
+        <button id="addLeadTop" class="primary">+ Lead</button>
+        <button id="logoutBtn" type="button" onclick="logoutUser()">Logout</button>
+      </div>
+    </header>
+
+    <section id="dashboard" class="page active">
+      <div id="metricGrid" class="metric-grid"></div>
+      <div class="split">
+        <section class="panel">
+          <h2>Course-wise Leads</h2>
+          <div id="courseChart" class="bar-list"></div>
+        </section>
+        <section class="panel">
+          <h2>Admin Performance</h2>
+          <div id="adminPerformance" class="table-wrap"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Today and Overdue Follow-ups</h2>
+        <div id="dashboardFollowups" class="table-wrap"></div>
+      </section>
+      <section class="panel">
+        <h2>Untouched Leads</h2>
+        <div id="untouchedLeads" class="table-wrap"></div>
+      </section>
+    </section>
+
+    <section id="leads" class="page">
+      <div class="toolbar">
+        <button class="primary" data-open-form>Add Manual Lead</button>
+        <button data-open-bulk>Bulk Paste Import</button>
+        <button id="exportLeads">Export Leads CSV</button>
+      </div>
+      <div class="filters" id="leadFilters"></div>
+      <div id="leadTable" class="table-wrap"></div>
+    </section>
+
+    <section id="archive" class="page">
+      <section class="panel">
+        <h2>Archived Leads</h2>
+        <p class="bulk-help">Deleted leads are stored here first. Lead Manager can restore or permanently delete them.</p>
+        <div id="archiveTable" class="table-wrap"></div>
+      </section>
+    </section>
+
+    <section id="followups" class="page">
+      <div class="filters" id="followupFilters"></div>
+      <div id="followupTable" class="table-wrap"></div>
+    </section>
+
+    <section id="admissions" class="page">
+      <div class="toolbar">
+        <button id="exportAdmissions">Export Admissions CSV</button>
+      </div>
+      <div id="admissionTable" class="table-wrap"></div>
+    </section>
+
+    <section id="targets" class="page">
+      <div class="split">
+        <section class="panel">
+          <h2>Create Target Plan</h2>
+          <form id="targetPlanForm" class="form-grid">
+            <input name="title" placeholder="Plan name e.g. CMA Target & Promotion Dec 26, June 27" required>
+            <select name="course"></select>
+            <input name="attempt" placeholder="Attempt e.g. June 2027" required>
+            <textarea name="branchTargets" rows="8" placeholder="Branch targets, one per line e.g.&#10;Borivali,99,150&#10;Andheri,40,80&#10;Online,7,25&#10;&#10;Format: Branch, Current, Target"></textarea>
+            <button class="primary">Save Plan</button>
+          </form>
+        </section>
+        <section class="panel">
+          <h2>Branch Competition</h2>
+          <p class="bulk-help">Track branch-wise current admissions, targets, achievement percentage, balance, and rank. Current count combines opening numbers from your plan plus new CRM admissions.</p>
+        </section>
+      </div>
+      <div id="targetPlans"></div>
+    </section>
+
+    <section id="whatsapp" class="page">
+      <div class="split">
+        <section class="panel">
+          <h2>Message Templates</h2>
+          <div id="templateList"></div>
+        </section>
+        <section class="panel">
+          <h2>Create Template</h2>
+          <form id="templateForm" class="form-grid">
+            <input name="name" placeholder="Template name" required>
+            <select name="course"></select>
+            <select name="stage"></select>
+            <textarea name="message" rows="8" placeholder="Use {{student_name}}, {{course_name}}, {{attempt}}, {{branch_name}}, {{counsellor_name}}"></textarea>
+            <button class="primary">Save Template</button>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <section id="reports" class="page">
+      <div class="filters" id="reportFilters"></div>
+      <div id="reportSummary" class="metric-grid"></div>
+      <div class="split">
+        <section class="panel">
+          <h2>Source Effectiveness</h2>
+          <div id="sourceReport" class="table-wrap"></div>
+        </section>
+        <section class="panel">
+          <h2>Branch Performance</h2>
+          <div id="branchReport" class="table-wrap"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="users" class="page">
+      <div class="split">
+        <section class="panel">
+          <h2>Users / Admins</h2>
+          <div id="userList" class="table-wrap"></div>
+        </section>
+        <section class="panel">
+          <h2 id="userFormTitle">Add User</h2>
+          <form id="userForm" class="form-grid">
+            <input type="hidden" name="id">
+            <input name="name" placeholder="Name" required>
+            <input name="mobile" placeholder="Mobile">
+            <input name="email" placeholder="Email">
+            <input name="password" placeholder="Password / PIN">
+            <select name="role">
+              <option>Super Admin</option>
+              <option>Lead Manager</option>
+              <option>Counsellor / Admin</option>
+            </select>
+            <select name="branch"></select>
+            <button class="primary">Save User</button>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <section id="settings" class="page">
+      <div class="settings-grid" id="settingsGrid"></div>
+    </section>
+  </main>
+
+  <dialog id="leadDialog">
+    <form id="leadForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2 id="leadFormTitle">Add Lead</h2>
+        <button type="button" class="ghost" data-close-modal>Close</button>
+      </div>
+      <input type="hidden" name="id">
+      <div class="lead-form-sections">
+        <section class="form-section">
+          <h3>Basic Details</h3>
+          <div class="form-grid three">
+            <label>Date of Enquiry<input name="enquiryDate" type="date"></label>
+            <label>First Name<input name="firstName" placeholder="First name" required></label>
+            <label>Last Name<input name="lastName" placeholder="Last name"></label>
+            <label>Mobile No.<input name="studentMobile" placeholder="Student mobile" required></label>
+            <label>Email ID<input name="email" placeholder="Email ID"></label>
+            <label>Location<input name="location" placeholder="Area where student stays"></label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h3>Academic Details</h3>
+          <div class="form-grid three">
+            <label>Education Level
+              <select name="educationLevel" id="educationLevel">
+                <option value="">Select education level</option>
+                <option>10th</option>
+                <option>12th</option>
+                <option>Graduate</option>
+              </select>
+            </label>
+            <label class="edu-field" data-edu="10th 12th Graduate">10th %<input name="tenthPercent" placeholder="10th percentage"></label>
+            <label class="edu-field" data-edu="10th 12th Graduate">School Name<input name="schoolName" placeholder="School name"></label>
+            <label class="edu-field" data-edu="12th Graduate">12th %<input name="twelfthPercent" placeholder="12th percentage"></label>
+            <label class="edu-field" data-edu="12th Graduate">College Name<input name="college" placeholder="College name"></label>
+            <label class="edu-field" data-edu="Graduate">Graduation %<input name="graduationPercent" placeholder="Graduation percentage"></label>
+            <label class="edu-field" data-edu="Graduate">Graduation In<input name="graduationIn" placeholder="BAF, B.Com, BMS"></label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h3>Parent & Enquiry</h3>
+          <div class="form-grid three">
+            <label>Parent Mobile No.<input name="parentMobile" placeholder="Parent mobile"></label>
+            <label>Relationship
+              <select name="relationship">
+                <option value="">Select relationship</option>
+                <option>Mother</option>
+                <option>Father</option>
+                <option>Brother</option>
+                <option>Sister</option>
+              </select>
+            </label>
+            <label>Enquiry For
+              <select name="course"></select>
+            </label>
+            <label>Attempt<input name="attempt" placeholder="June 2027 / December 2027"></label>
+            <label>Lead Source<input name="leadSource" placeholder="Manual source e.g. Instagram ad, seminar, call list"></label>
+            <label>Reference
+              <select name="source" id="referenceType"></select>
+            </label>
+            <label>Add New Reference<input name="newReference" placeholder="Optional new reference"></label>
+            <label class="reference-extra hidden" data-reference="Past Students|Existing students">Student Name<input name="referenceStudentName" placeholder="Reference student name"></label>
+            <label class="reference-extra hidden" data-reference="Past Students|Existing students">Student ID<input name="referenceStudentId" placeholder="Reference student ID"></label>
+            <label class="reference-extra hidden" data-reference="Classes Owner">Classes Name<input name="referenceClassName" placeholder="Name of the classes"></label>
+            <label class="reference-extra hidden" data-reference="Classes Owner">Classes Location<input name="referenceClassLocation" placeholder="Location of the classes"></label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h3>Admin Remark</h3>
+          <div class="form-grid three">
+            <label>Assign Batch<select name="batch"></select></label>
+            <label>Admin Assigned<select name="assignedTo"></select></label>
+            <label>Lead Status<select name="status"></select></label>
+            <label>Follow up next<input name="followupAt" type="datetime-local"></label>
+            <label>Preferred Branch<select name="branch"></select></label>
+            <label>Remark<textarea name="remarks" rows="3" placeholder="Admin remarks"></textarea></label>
+          </div>
+        </section>
+      </div>
+      <p id="duplicateWarning" class="warning hidden"></p>
+      <div class="modal-actions">
+        <button type="button" data-close-modal>Cancel</button>
+        <button class="primary">Save Lead</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bulkDialog">
+    <div class="modal-form">
+      <div class="modal-head">
+        <h2>Bulk Paste Import</h2>
+        <button class="ghost" data-close-bulk>Close</button>
+      </div>
+      <p class="bulk-help">Paste any format. The system will group each student, detect mobile, name, location, and education, then let you correct the tags before saving.</p>
+      <textarea id="bulkText" rows="9" placeholder="Paste from Excel, WhatsApp, website enquiries, or raw lists."></textarea>
+      <div class="modal-actions">
+        <button id="parseBulk">Preview</button>
+        <button id="saveBulk" class="primary">Save Non-duplicates</button>
+      </div>
+      <div id="bulkPreview" class="table-wrap"></div>
+    </div>
+  </dialog>
+
+  <dialog id="followupDialog">
+    <form id="followupForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2>Add Follow-up</h2>
+        <button type="button" class="ghost" data-close-followup>Close</button>
+      </div>
+      <input type="hidden" name="leadId">
+      <select name="status"></select>
+      <input name="nextFollowup" type="datetime-local">
+      <textarea name="remarks" rows="5" placeholder="Call remarks and next action"></textarea>
+      <div class="modal-actions">
+        <button type="button" data-close-followup>Cancel</button>
+        <button class="primary">Save Follow-up</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="admissionDialog">
+    <form id="admissionForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2>Convert to Admission</h2>
+        <button type="button" class="ghost" data-close-admission>Close</button>
+      </div>
+      <input type="hidden" name="leadId">
+      <div class="form-grid two">
+        <input name="admissionDate" type="date" required>
+        <select name="course"></select>
+        <select name="batch"></select>
+        <input name="feesAgreed" type="number" placeholder="Fees agreed">
+        <input name="feesPaid" type="number" placeholder="Fees paid">
+        <input name="paymentMode" placeholder="Payment mode">
+        <input name="receiptNumber" placeholder="Receipt number">
+        <select name="counsellor"></select>
+        <textarea name="remarks" rows="3" placeholder="Admission remarks"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" data-close-admission>Cancel</button>
+        <button class="primary">Save Admission</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="assignAdminDialog">
+    <form id="assignAdminForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2>Assign Lead</h2>
+        <button type="button" class="ghost" data-close-assign-admin>Close</button>
+      </div>
+      <input type="hidden" name="leadId">
+      <div class="form-grid">
+        <label>Admin / Counsellor
+          <select name="assignedTo"></select>
+        </label>
+        <label>Assignment Comment
+          <textarea name="assignmentComment" rows="4" placeholder="Reason, instruction, or next action for counsellor"></textarea>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" data-close-assign-admin>Cancel</button>
+        <button class="primary">Save Assignment</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
