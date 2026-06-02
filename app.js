@@ -1496,9 +1496,15 @@ function loadAdmissionSheetPayload({ silent = false, afterLoad = null } = {}) {
   window[callbackName] = payload => {
     try {
       if (!payload?.ok) throw new Error(payload?.error || "Could not read admission Google Sheet.");
+      if (!Array.isArray(payload.rows) && payload.data !== undefined) {
+        throw new Error("Apps Script is still running the old deployment. Redeploy a new version of google-apps-script.gs, then try again.");
+      }
       admissionSheetPayload = { rows: payload.rows || [], headers: payload.headers || [], tabs: payload.tabs || [] };
+      if (!admissionSheetPayload.rows.length) {
+        setSheetStatus(`Admission sheet loaded but no rows were found. Check tabs: ${admissionSheetPayload.tabs.join(", ") || "CMAFC D6, Inter D26"}.`);
+      }
       if (afterLoad) afterLoad();
-      if (!silent) setSheetStatus(`Admission sheet loaded: ${admissionSheetPayload.rows.length} rows from ${admissionSheetPayload.tabs.join(", ")}.`);
+      if (!silent && admissionSheetPayload.rows.length) setSheetStatus(`Admission sheet loaded: ${admissionSheetPayload.rows.length} rows from ${admissionSheetPayload.tabs.join(", ")}.`);
     } catch (error) {
       setSheetStatus("Admission sheet update failed. Check Apps Script deployment and sheet access.");
       alert(`Admission sheet update failed: ${error.message}`);
@@ -1522,6 +1528,11 @@ function renderAdmissionSheetMapping() {
   const headers = admissionSheetPayload?.headers || [];
   const rows = admissionSheetPayload?.rows || [];
   const options = admissionMappingOptions();
+  if (!headers.length || !rows.length) {
+    document.getElementById("admissionMapping").innerHTML = "<p class='warning'>No admission rows were found. Please redeploy the updated Apps Script, and confirm the admission file has tabs named CMAFC D6 and Inter D26 with data rows.</p>";
+    document.getElementById("admissionPreview").innerHTML = "";
+    return;
+  }
   const html = `
     <table class="legacy-map-table">
       <thead><tr><th>Admission Sheet Column</th><th>Use In CRM As</th><th>Custom Field Name</th><th>Sample Value</th></tr></thead>

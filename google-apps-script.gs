@@ -65,7 +65,7 @@ function readOldLeadResponses_() {
 function readAdmissionSheets_() {
   const spreadsheet = SpreadsheetApp.openById(ADMISSION_SPREADSHEET_ID);
   const tabs = ADMISSION_SHEET_NAMES.map(name => {
-    const sheet = spreadsheet.getSheetByName(name);
+    const sheet = findSheetByName_(spreadsheet, name);
     if (!sheet) throw new Error(`Sheet not found: ${name}`);
     return readRowsFromSheet_(sheet, name);
   });
@@ -77,15 +77,45 @@ function readAdmissionSheets_() {
 function readRowsFromSheet_(sheet, sourceName) {
   const values = sheet.getDataRange().getDisplayValues();
   if (values.length < 2) return { ok: true, source: sourceName, headers: values[0] || [], rows: [] };
-  const headers = values[0].map(header => String(header || "").trim());
-  const rows = values.slice(1)
+  const headerIndex = findHeaderRowIndex_(values);
+  const headers = values[headerIndex].map((header, index) => String(header || `Column ${index + 1}`).trim());
+  const rows = values.slice(headerIndex + 1)
     .filter(row => row.some(cell => String(cell || "").trim()))
     .map((row, index) => {
-      const record = { _rowNumber: index + 2, _sheetName: sourceName };
+      const record = { _rowNumber: headerIndex + index + 2, _sheetName: sourceName };
       headers.forEach((header, colIndex) => {
         record[header || `Column ${colIndex + 1}`] = row[colIndex] || "";
       });
       return record;
     });
-  return { ok: true, source: sourceName, headers, rows };
+  return { ok: true, source: sourceName, headerRow: headerIndex + 1, headers, rows };
+}
+
+function findHeaderRowIndex_(values) {
+  let bestIndex = 0;
+  let bestScore = -1;
+  values.slice(0, Math.min(values.length, 25)).forEach((row, index) => {
+    const cells = row.map(cell => String(cell || "").trim()).filter(Boolean);
+    const joined = cells.join(" ").toLowerCase();
+    const keywordScore = [
+      "name", "mobile", "phone", "course", "batch", "branch", "admission", "fees", "receipt"
+    ].filter(word => joined.includes(word)).length * 5;
+    const score = cells.length + keywordScore;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function findSheetByName_(spreadsheet, expectedName) {
+  const exact = spreadsheet.getSheetByName(expectedName);
+  if (exact) return exact;
+  const normalizedExpected = normalizeSheetName_(expectedName);
+  return spreadsheet.getSheets().find(sheet => normalizeSheetName_(sheet.getName()) === normalizedExpected) || null;
+}
+
+function normalizeSheetName_(name) {
+  return String(name || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
