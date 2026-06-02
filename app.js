@@ -1108,8 +1108,8 @@ function guessLegacyField(header) {
   if (/mail/.test(label)) return "email";
   if (/course|cma|foundation|inter|final/.test(label)) return "course";
   if (/attempt|exam|month|june|dec/.test(label)) return "attempt";
-  if (/branch|preferred.*location/.test(label)) return "branch";
-  if (/location|area|city|stay|address/.test(label)) return "location";
+  if (/student.*location|student.*area|where.*stay|stay|city/.test(label)) return "location";
+  if (/branch|preferred.*location|location|address/.test(label)) return "branch";
   if (/qualification|education|class|graduation|academic/.test(label)) return "academicBackground";
   if (/college|school|institution/.test(label)) return "college";
   if (/source|reference/.test(label)) return "leadSource";
@@ -1220,14 +1220,14 @@ function legacyRowToLead(row, headers, sourceName, mapping = {}, customNames = {
   const parentMobile = onlyPhone(mapped.parentMobile) || onlyPhone(legacyField(row, headers, ["parent", "father", "mother", "guardian"])) || phones.find(phone => phone !== mobile) || "";
   const email = mapped.email || legacyField(row, headers, ["email", "mail"]) || (rowText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [""])[0];
   const timestamp = mapped.createdAt || legacyField(row, headers, ["timestamp", "date", "created", "submitted"]);
-  const location = mapped.location || legacyField(row, headers, ["location", "area", "city", "where do you stay", "stay"]);
+  const location = mapped.location || "";
   const courseText = mapped.course || legacyField(row, headers, ["course", "enquiry", "interested"]);
   const attempt = mapped.attempt || legacyField(row, headers, ["attempt", "exam", "month"]);
   const qualification = mapped.academicBackground || legacyField(row, headers, ["qualification", "education", "class", "graduation", "college", "academic"]);
   const college = mapped.college || legacyField(row, headers, ["college", "school", "institution"]);
-  const branch = mapped.branch || legacyField(row, headers, ["branch", "location preferred", "preferred branch"]);
+  const branch = mapped.branch || legacyField(row, headers, ["branch", "location", "address", "location preferred", "preferred branch"]);
   const assignedTo = matchAdminName(mapped.assignedTo) || currentUser?.name || state.users[0]?.name || "";
-  const legacyCategory = normalizeLegacyCategory(mapped.legacyCategory || legacyField(row, headers, ["category", "stage", "calling status", "response status", "final status"]));
+  const legacyCategory = detectLegacyCategory(row, headers, mapped);
   const status = legacyStatusFromCategory(legacyCategory, mapped.status);
   const mappedRemarkFields = headers.filter(header => mapping[header] === "remarks");
   const firstName = mapped.firstName || firstNameOf(name || "Unknown Student");
@@ -1240,7 +1240,7 @@ function legacyRowToLead(row, headers, sourceName, mapping = {}, customNames = {
     parentMobile,
     email,
     location: smartTitleCase(location),
-    branch: branch || detectBranch(rowText, location) || "Unassigned",
+    branch: detectBranch(branch || rowText, branch) || "Unassigned",
     course: courseText ? detectCourse(courseText) : detectCourse(rowText),
     attempt: attempt || "",
     academicBackground: qualification || "",
@@ -1254,7 +1254,7 @@ function legacyRowToLead(row, headers, sourceName, mapping = {}, customNames = {
     followupAt: nextDayInputValue(),
     createdAt: parseDateOrNow(timestamp),
     oldSheetSource: sourceName,
-    customFields,
+    customFields: addCourseGroupCustomField(customFields, courseText || rowText),
     _remarkFields: mappedRemarkFields.map(header => `${header}: ${row[header]}`).filter(Boolean).join("<br>")
   };
   return lead;
@@ -1285,7 +1285,40 @@ function mappedLegacyCustomFields(row, headers, mapping, customNames = {}) {
 }
 
 function normalizeLegacyCategory(value) {
-  return String(value || "").trim().replace(/\s+/g, " ");
+  return String(value || "").trim().replace(/[–—]/g, "-").replace(/\s+/g, " ");
+}
+
+function legacyCategories() {
+  return [
+    "Admission Done",
+    "Admission in Process",
+    "Will Visit Branch",
+    "Will Attend Demo",
+    "Follow Up Again",
+    "Will Let Us Know in 1-2 Days",
+    "Will Let Us Know in 1–2 Days",
+    "After Result",
+    "Not Connected",
+    "Not Connected Called Many Times",
+    "Joined Other CMA Classes",
+    "Joined Other Course in JKSC",
+    "Not Interested to Join JKSC",
+    "Drop CMA",
+    "Fees Issue at JKSC",
+    "Out of Station",
+    "Wrong Number",
+    "Duplicate",
+    "Others"
+  ];
+}
+
+function detectLegacyCategory(row, headers, mapped = {}) {
+  const direct = normalizeLegacyCategory(mapped.legacyCategory || legacyField(row, headers, ["category", "stage", "calling status", "response status", "final status"]));
+  const text = [direct, ...headers.map(header => row[header] || "")].join("\n").toLowerCase();
+  const categories = legacyCategories();
+  const admissionDone = categories[0];
+  if (text.includes(admissionDone.toLowerCase())) return admissionDone;
+  return categories.find(category => text.includes(category.toLowerCase())) || direct;
 }
 
 function isAdmissionDoneCategory(category) {
@@ -1343,6 +1376,20 @@ function ensureLegacyAdmission(lead, importedLead) {
   return true;
 }
 
+function addCourseGroupCustomField(customFields, courseText) {
+  const group = detectCourseGroup(courseText);
+  if (!group) return customFields;
+  addUnique(state.customLeadFields, "Course Group");
+  return { ...customFields, "Course Group": group };
+}
+
+function detectCourseGroup(text) {
+  const upper = String(text || "").toUpperCase();
+  if (/\bBG\b/.test(upper)) return "Both Groups";
+  const group = upper.match(/\bG\s*([1-4])\b/);
+  return group ? `Group ${group[1]}` : "";
+}
+
 function matchAdminName(value) {
   const normalized = normalizeLogin(value);
   if (!normalized) return "";
@@ -1376,6 +1423,7 @@ function mergeLegacyLead(existing, imported, options = {}) {
   ["studentName", "firstName", "lastName", "parentMobile", "email", "location", "branch", "course", "attempt", "academicBackground", "currentQualification", "college", "source", "leadSource"].forEach(key => {
     if ((options.overwrite || !existing[key]) && imported[key]) existing[key] = imported[key];
   });
+  if (options.overwrite && imported.oldSheetSource && !imported.location) existing.location = "";
   if ((options.overwrite || !existing.assignedTo) && imported.assignedTo) existing.assignedTo = imported.assignedTo;
   if ((options.overwrite || !existing.status) && imported.status) existing.status = imported.status;
   if (imported.customFields && Object.keys(imported.customFields).length) {
@@ -2323,9 +2371,11 @@ function cleanTaggedLine(line, prefixes) {
 
 function detectCourse(text) {
   const lower = text.toLowerCase();
-  if (/\bcmai\b|\bcma\s*i\b|\binter\b|\bintermediate\b/.test(lower)) return preferredCourseName("CMA Intermediate");
-  if (/\bcmaf\b|\bcma\s*f\b|\bfoundation\b|\bfoun\b/.test(lower)) return preferredCourseName("CMA Foundation");
-  if (/\bcmafinal\b|\bcma\s*final\b|\bfinal\b/.test(lower)) return preferredCourseName("CMA Final");
+  const compact = lower.replace(/[^a-z0-9]/g, "");
+  if (/\bcmafc\b/.test(lower) || compact.includes("cmafc")) return preferredCourseName("CMA Foundation");
+  if (/\bcmai\b|\bcma\s*i\b|\bcmai\s*(g[12]|bg)\b|\binter\b|\bintermediate\b/.test(lower) || compact.startsWith("cmai")) return preferredCourseName("CMA Intermediate");
+  if (/\bcma\s*final\b|\bcmafinal\b|\bfinal\s*(g[1-4]|bg)?\b|\bfinal\b/.test(lower) || compact.includes("cmafinal")) return preferredCourseName("CMA Final");
+  if (/\bcmaf\b|\bcma\s*f\b|\bfoundation\b|\bfoun\b/.test(lower) || compact.includes("cmaf")) return preferredCourseName("CMA Foundation");
   return masters.courses[0] || "";
 }
 
