@@ -1,4 +1,5 @@
 const storeKey = "cmaAdmissionCrm.v1";
+const fixedSheetWebAppUrl = "https://script.google.com/macros/s/AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A/exec";
 const tabs = [
   ["dashboard", "Dashboard"],
   ["leads", "Leads"],
@@ -93,6 +94,7 @@ let activeTab = "dashboard";
 let parsedBulk = [];
 let currentUser = null;
 let syncTimer = null;
+let periodicSyncTimer = null;
 let isCloudLoading = false;
 
 function id() { return Math.random().toString(36).slice(2, 10); }
@@ -139,13 +141,11 @@ function loadCurrentUser() {
 function loginUser(e) {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
-  const loginId = data.loginId.trim().toLowerCase();
-  const user = state.users.find(u =>
-    [firstNameOf(u.name), u.mobile, u.email].filter(Boolean).some(value => String(value).toLowerCase() === loginId)
-  );
+  const loginId = normalizeLogin(data.loginId);
+  const user = state.users.find(u => loginMatchesUser(loginId, u));
   const loginError = document.getElementById("loginError");
   if (!user) {
-    loginError.textContent = "User not found. Use first name, mobile, or email.";
+    loginError.textContent = "User not found. Use first name, full name, mobile, or email.";
     loginError.classList.remove("hidden");
     return;
   }
@@ -236,6 +236,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   loadCurrentUser();
   applyTheme(getThemeSetting());
+  ensureFixedSheetSync();
+  startPeriodicSheetSync();
   if (getSheetSyncSettings().auto && getSheetSyncSettings().url) loadFromSheet({ silent: true });
   clearCampaignForm();
   render();
@@ -609,15 +611,15 @@ function renderSettings() {
     </section>
     <section class="panel">
       <h2>Google Sheet Database</h2>
-      <p class="bulk-help">Paste your deployed Google Apps Script Web App URL. Auto sync loads from Google Sheet on app open and saves changes after edits.</p>
+      <p class="bulk-help">Fixed database is connected. The CRM auto-loads on open, auto-saves after edits, and also saves quietly every 5 minutes.</p>
       <div class="form-grid">
-        <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL">
+        <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL" readonly>
         <label><input id="autoSheetSync" type="checkbox"> Auto load and auto save</label>
       </div>
       <div class="toolbar">
         <button data-save-sheet-settings type="button">Save Sync Settings</button>
-        <button data-load-from-sheet type="button">Load From Sheet</button>
-        <button data-save-to-sheet type="button">Save To Sheet</button>
+        <button data-load-from-sheet type="button">Load all work</button>
+        <button data-save-to-sheet type="button">Save your work</button>
       </div>
       <p id="sheetSyncStatus" class="bulk-help"></p>
     </section>`;
@@ -653,14 +655,31 @@ function withUnassigned(values) {
 
 function getSheetSyncSettings() {
   try {
-    return JSON.parse(localStorage.getItem(`${storeKey}.sheetSync`) || "{}");
+    const saved = JSON.parse(localStorage.getItem(`${storeKey}.sheetSync`) || "{}");
+    return {
+      url: normalizeSheetUrl(saved.url) || fixedSheetWebAppUrl,
+      auto: saved.auto !== false
+    };
   } catch {
-    return {};
+    return { url: fixedSheetWebAppUrl, auto: true };
   }
 }
 
 function setSheetSyncSettings(settings) {
-  localStorage.setItem(`${storeKey}.sheetSync`, JSON.stringify(settings));
+  localStorage.setItem(`${storeKey}.sheetSync`, JSON.stringify({
+    url: normalizeSheetUrl(settings.url) || fixedSheetWebAppUrl,
+    auto: settings.auto !== false
+  }));
+}
+
+function ensureFixedSheetSync() {
+  setSheetSyncSettings(getSheetSyncSettings());
+}
+
+function normalizeSheetUrl(url) {
+  const value = String(url || "").trim();
+  const match = value.match(/https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/);
+  return match ? match[0] : "";
 }
 
 function renderSheetSyncSettings() {
@@ -669,14 +688,15 @@ function renderSheetSyncSettings() {
   const auto = document.getElementById("autoSheetSync");
   if (url) url.value = settings.url || "";
   if (auto) auto.checked = Boolean(settings.auto);
-  setSheetStatus(settings.url ? "Google Sheet sync configured." : "Google Sheet sync not configured yet.");
+  setSheetStatus(settings.auto ? "Auto sync is ON. Work saves automatically." : "Auto sync is OFF. Use Save your work manually.");
 }
 
 function saveSheetSyncSettings() {
-  const url = document.getElementById("sheetWebAppUrl")?.value.trim() || "";
+  const url = normalizeSheetUrl(document.getElementById("sheetWebAppUrl")?.value) || fixedSheetWebAppUrl;
   const auto = Boolean(document.getElementById("autoSheetSync")?.checked);
   setSheetSyncSettings({ url, auto });
-  setSheetStatus(auto && url ? "Auto sync enabled." : "Sync settings saved.");
+  if (auto) startPeriodicSheetSync();
+  setSheetStatus(auto ? "Auto sync enabled. Your work will save automatically." : "Auto sync off. Use Save your work manually.");
 }
 
 function setSheetStatus(message) {
@@ -689,6 +709,14 @@ function queueCloudSave() {
   if (!settings.auto || !settings.url || isCloudLoading) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => saveToSheet({ silent: true }), 1200);
+}
+
+function startPeriodicSheetSync() {
+  clearInterval(periodicSyncTimer);
+  periodicSyncTimer = setInterval(() => {
+    const settings = getSheetSyncSettings();
+    if (settings.auto && settings.url && !isCloudLoading) saveToSheet({ silent: true });
+  }, 5 * 60 * 1000);
 }
 
 function saveToSheet({ silent = false } = {}) {
@@ -1941,6 +1969,23 @@ function displayLeadName(lead) {
 }
 function firstNameOf(name) {
   return String(name || "").trim().split(/\s+/)[0] || "";
+}
+function loginMatchesUser(loginId, user) {
+  const candidates = [
+    user.name,
+    firstNameOf(user.name),
+    user.mobile,
+    user.email
+  ].map(normalizeLogin).filter(Boolean);
+  if (candidates.some(candidate => candidate === loginId)) return true;
+  return candidates.some(candidate => loginId.length >= 4 && candidate.startsWith(loginId));
+}
+function normalizeLogin(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/(.)\1+/g, "$1");
 }
 function titleCase(s) { return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
 function smartTitleCase(s) {
