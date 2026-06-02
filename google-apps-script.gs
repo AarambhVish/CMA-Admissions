@@ -2,7 +2,11 @@ const SHEET_NAME = "Database";
 const OLD_LEADS_SPREADSHEET_ID = "1yB27fwVWdLY0jzpf6CTwtFQchrVUQHIAMgcw0OILu6s";
 const OLD_LEADS_SHEET_NAME = "Form Responses 1";
 const ADMISSION_SPREADSHEET_ID = "1TfBPncD41S0xCxX7uPOQVJJxltPFET5V8Ez3meJ6hlI";
-const ADMISSION_SHEET_NAMES = ["CMAFC D6", "Inter D26"];
+const ADMISSION_SHEET_NAMES = ["CMAFC D26", "Inter D26"];
+const ADMISSION_SHEET_PATTERNS = [
+  ["cmafc", "d26"],
+  ["inter", "d26"]
+];
 
 function doGet(e) {
   const callback = (e.parameter.callback || "callback").replace(/[^\w$.]/g, "");
@@ -64,11 +68,12 @@ function readOldLeadResponses_() {
 
 function readAdmissionSheets_() {
   const spreadsheet = SpreadsheetApp.openById(ADMISSION_SPREADSHEET_ID);
-  const tabs = ADMISSION_SHEET_NAMES.map(name => {
-    const sheet = findSheetByName_(spreadsheet, name);
-    if (!sheet) throw new Error(`Sheet not found: ${name}`);
-    return readRowsFromSheet_(sheet, name);
-  });
+  const sheets = findAdmissionSheets_(spreadsheet);
+  if (!sheets.length) {
+    const available = spreadsheet.getSheets().map(sheet => sheet.getName()).join(", ");
+    throw new Error(`Admission tabs not found. Available tabs: ${available}`);
+  }
+  const tabs = sheets.map(sheet => readRowsFromSheet_(sheet, sheet.getName()));
   const headers = Array.from(new Set(tabs.flatMap(tab => tab.headers)));
   const rows = tabs.flatMap(tab => tab.rows.map(row => ({ ...row, _sheetName: tab.source })));
   return { ok: true, source: "Admission Sheets", tabs: tabs.map(tab => tab.source), headers, rows };
@@ -114,6 +119,23 @@ function findSheetByName_(spreadsheet, expectedName) {
   if (exact) return exact;
   const normalizedExpected = normalizeSheetName_(expectedName);
   return spreadsheet.getSheets().find(sheet => normalizeSheetName_(sheet.getName()) === normalizedExpected) || null;
+}
+
+function findAdmissionSheets_(spreadsheet) {
+  const allSheets = spreadsheet.getSheets();
+  const found = [];
+  ADMISSION_SHEET_NAMES.forEach(name => {
+    const sheet = findSheetByName_(spreadsheet, name);
+    if (sheet && !found.includes(sheet)) found.push(sheet);
+  });
+  ADMISSION_SHEET_PATTERNS.forEach(pattern => {
+    const sheet = allSheets.find(item => {
+      const normalized = normalizeSheetName_(item.getName());
+      return pattern.every(part => normalized.includes(part));
+    });
+    if (sheet && !found.includes(sheet)) found.push(sheet);
+  });
+  return found;
 }
 
 function normalizeSheetName_(name) {
