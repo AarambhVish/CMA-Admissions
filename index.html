@@ -435,6 +435,23 @@
     </div>
   </dialog>
 
+  <dialog id="admissionSheetDialog">
+    <div class="modal-form">
+      <div class="modal-head">
+        <h2>Map Admission Sheet Columns</h2>
+        <button type="button" class="ghost" data-close-admission-sheet>Close</button>
+      </div>
+      <p class="bulk-help">Map the admission sheet columns. Matching is by mobile first, then student name. Matched records will be marked admitted and assigned batch/branch from the admission sheet.</p>
+      <label><input id="admissionOverwrite" type="checkbox" checked> Overwrite course, batch, branch, and admission details for matched leads</label>
+      <div id="admissionMapping" class="table-wrap"></div>
+      <div id="admissionPreview" class="table-wrap"></div>
+      <div class="modal-actions">
+        <button type="button" data-close-admission-sheet>Cancel</button>
+        <button type="button" class="primary" data-import-admission-sheet>Import / Update Admissions</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="app.js"></script>
 </body>
 </html>

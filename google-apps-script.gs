@@ -1,13 +1,17 @@
 const SHEET_NAME = "Database";
 const OLD_LEADS_SPREADSHEET_ID = "1yB27fwVWdLY0jzpf6CTwtFQchrVUQHIAMgcw0OILu6s";
 const OLD_LEADS_SHEET_NAME = "Form Responses 1";
+const ADMISSION_SPREADSHEET_ID = "1TfBPncD41S0xCxX7uPOQVJJxltPFET5V8Ez3meJ6hlI";
+const ADMISSION_SHEET_NAMES = ["CMAFC D6", "Inter D26"];
 
 function doGet(e) {
   const callback = (e.parameter.callback || "callback").replace(/[^\w$.]/g, "");
   const mode = e.parameter.mode || "load";
   const payload = mode === "legacy"
     ? readOldLeadResponses_()
-    : { ok: true, data: readDatabase_() };
+    : mode === "admissions"
+      ? readAdmissionSheets_()
+      : { ok: true, data: readDatabase_() };
   const output = `${callback}(${JSON.stringify(payload)});`;
   return ContentService
     .createTextOutput(output)
@@ -55,17 +59,33 @@ function readOldLeadResponses_() {
   const spreadsheet = SpreadsheetApp.openById(OLD_LEADS_SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(OLD_LEADS_SHEET_NAME);
   if (!sheet) throw new Error(`Sheet not found: ${OLD_LEADS_SHEET_NAME}`);
+  return readRowsFromSheet_(sheet, OLD_LEADS_SHEET_NAME);
+}
+
+function readAdmissionSheets_() {
+  const spreadsheet = SpreadsheetApp.openById(ADMISSION_SPREADSHEET_ID);
+  const tabs = ADMISSION_SHEET_NAMES.map(name => {
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet) throw new Error(`Sheet not found: ${name}`);
+    return readRowsFromSheet_(sheet, name);
+  });
+  const headers = Array.from(new Set(tabs.flatMap(tab => tab.headers)));
+  const rows = tabs.flatMap(tab => tab.rows.map(row => ({ ...row, _sheetName: tab.source })));
+  return { ok: true, source: "Admission Sheets", tabs: tabs.map(tab => tab.source), headers, rows };
+}
+
+function readRowsFromSheet_(sheet, sourceName) {
   const values = sheet.getDataRange().getDisplayValues();
-  if (values.length < 2) return { ok: true, headers: values[0] || [], rows: [] };
+  if (values.length < 2) return { ok: true, source: sourceName, headers: values[0] || [], rows: [] };
   const headers = values[0].map(header => String(header || "").trim());
   const rows = values.slice(1)
     .filter(row => row.some(cell => String(cell || "").trim()))
     .map((row, index) => {
-      const record = { _rowNumber: index + 2 };
+      const record = { _rowNumber: index + 2, _sheetName: sourceName };
       headers.forEach((header, colIndex) => {
         record[header || `Column ${colIndex + 1}`] = row[colIndex] || "";
       });
       return record;
     });
-  return { ok: true, source: OLD_LEADS_SHEET_NAME, headers, rows };
+  return { ok: true, source: sourceName, headers, rows };
 }

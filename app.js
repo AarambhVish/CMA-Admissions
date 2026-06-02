@@ -112,6 +112,8 @@ let syncTimer = null;
 let periodicSyncTimer = null;
 let isCloudLoading = false;
 let legacySheetPayload = null;
+let admissionSheetPayload = null;
+let syncAdmissionsAfterLegacy = false;
 
 function id() { return Math.random().toString(36).slice(2, 10); }
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -298,6 +300,7 @@ function bindEvents() {
   document.querySelectorAll("[data-close-admission]").forEach(b => b.addEventListener("click", () => document.getElementById("admissionDialog").close()));
   document.querySelectorAll("[data-close-assign-admin]").forEach(b => b.addEventListener("click", () => document.getElementById("assignAdminDialog").close()));
   document.querySelectorAll("[data-close-legacy-sheet]").forEach(b => b.addEventListener("click", () => document.getElementById("legacySheetDialog").close()));
+  document.querySelectorAll("[data-close-admission-sheet]").forEach(b => b.addEventListener("click", () => document.getElementById("admissionSheetDialog").close()));
   document.getElementById("leadForm").addEventListener("submit", saveLead);
   document.getElementById("educationLevel").addEventListener("change", updateEducationFields);
   document.getElementById("referenceType").addEventListener("change", updateReferenceFields);
@@ -692,6 +695,8 @@ function renderSettings() {
         <button data-load-from-sheet type="button">Load all work</button>
         <button data-save-to-sheet type="button">Save your work</button>
         <button data-update-old-sheet type="button">Update from Google Sheet</button>
+        <button data-update-admission-sheet type="button">Update Admissions Sheet</button>
+        <button data-sync-leads-admissions class="primary" type="button">Sync Leads + Admissions</button>
       </div>
       <p id="sheetSyncStatus" class="bulk-help"></p>
     </section>`;
@@ -990,12 +995,12 @@ function loadFromSheet({ silent = false } = {}) {
   document.body.appendChild(script);
 }
 
-function updateFromOldGoogleSheet() {
+function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
   if (!isSuperAdmin() && !isLeadManager()) {
     alert("Only Super Admin or Lead Manager can update leads from the old Google Sheet.");
     return;
   }
-  if (!confirm("Load old Google Sheet columns for mapping before import? No CRM data will change until you confirm the final import.")) return;
+  if (!skipConfirm && !confirm("Load old Google Sheet columns for mapping before import? No CRM data will change until you confirm the final import.")) return;
   const settings = getSheetSyncSettings();
   const callbackName = `crmLegacySheet_${Date.now()}`;
   setSheetStatus("Reading old Google Sheet...");
@@ -1023,6 +1028,17 @@ function updateFromOldGoogleSheet() {
     script.remove();
   };
   document.body.appendChild(script);
+}
+
+function syncLeadsAndAdmissions() {
+  if (!isSuperAdmin() && !isLeadManager()) {
+    alert("Only Super Admin or Lead Manager can sync leads and admissions.");
+    return;
+  }
+  if (!confirm("Sync old leads and admissions together? You will map leads first, then admissions. CRM data changes only after each final import confirmation.")) return;
+  syncAdmissionsAfterLegacy = true;
+  setSheetStatus("Loading old leads and admission sheets...");
+  loadAdmissionSheetPayload({ silent: true, afterLoad: () => updateFromOldGoogleSheet({ skipConfirm: true }) });
 }
 
 function renderLegacySheetMapping() {
@@ -1163,6 +1179,13 @@ function confirmImportLegacySheet() {
   render();
   document.getElementById("legacySheetDialog").close();
   setSheetStatus(`Old Google Sheet updated: ${result.created} new, ${result.updated} updated, ${result.admitted} admissions, ${result.skipped} skipped.`);
+  if (syncAdmissionsAfterLegacy && admissionSheetPayload) {
+    alert(`Leads updated.\nNew leads: ${result.created}\nUpdated leads: ${result.updated}\nAdmissions from lead categories: ${result.admitted}\nSkipped rows: ${result.skipped}\n\nNext: map the admissions sheet.`);
+    renderAdmissionSheetMapping();
+    document.getElementById("admissionSheetDialog").showModal();
+    setSheetStatus("Leads updated. Now map and import admissions.");
+    return;
+  }
   alert(`Updated from Google Sheet.\nNew leads: ${result.created}\nUpdated leads: ${result.updated}\nAdmissions created: ${result.admitted}\nSkipped rows: ${result.skipped}`);
 }
 
@@ -1452,6 +1475,352 @@ function formatCustomFields(fields = {}) {
 function cssEscape(value) {
   if (window.CSS?.escape) return window.CSS.escape(value);
   return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function updateFromAdmissionGoogleSheet() {
+  if (!isSuperAdmin() && !isLeadManager()) {
+    alert("Only Super Admin or Lead Manager can update admissions from Google Sheet.");
+    return;
+  }
+  if (!confirm("Load admission sheet tabs CMAFC D6 and Inter D26 for mapping? No CRM data will change until final import.")) return;
+  loadAdmissionSheetPayload({ silent: false, afterLoad: () => {
+    renderAdmissionSheetMapping();
+    document.getElementById("admissionSheetDialog").showModal();
+  }});
+}
+
+function loadAdmissionSheetPayload({ silent = false, afterLoad = null } = {}) {
+  const settings = getSheetSyncSettings();
+  const callbackName = `crmAdmissionSheet_${Date.now()}`;
+  if (!silent) setSheetStatus("Reading admission Google Sheet...");
+  window[callbackName] = payload => {
+    try {
+      if (!payload?.ok) throw new Error(payload?.error || "Could not read admission Google Sheet.");
+      admissionSheetPayload = { rows: payload.rows || [], headers: payload.headers || [], tabs: payload.tabs || [] };
+      if (afterLoad) afterLoad();
+      if (!silent) setSheetStatus(`Admission sheet loaded: ${admissionSheetPayload.rows.length} rows from ${admissionSheetPayload.tabs.join(", ")}.`);
+    } catch (error) {
+      setSheetStatus("Admission sheet update failed. Check Apps Script deployment and sheet access.");
+      alert(`Admission sheet update failed: ${error.message}`);
+    } finally {
+      delete window[callbackName];
+      document.getElementById(callbackName)?.remove();
+    }
+  };
+  const script = document.createElement("script");
+  script.id = callbackName;
+  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=admissions&callback=${callbackName}&t=${Date.now()}`;
+  script.onerror = () => {
+    setSheetStatus("Admission sheet update failed. Check Apps Script access.");
+    delete window[callbackName];
+    script.remove();
+  };
+  document.body.appendChild(script);
+}
+
+function renderAdmissionSheetMapping() {
+  const headers = admissionSheetPayload?.headers || [];
+  const rows = admissionSheetPayload?.rows || [];
+  const options = admissionMappingOptions();
+  const html = `
+    <table class="legacy-map-table">
+      <thead><tr><th>Admission Sheet Column</th><th>Use In CRM As</th><th>Custom Field Name</th><th>Sample Value</th></tr></thead>
+      <tbody>
+        ${headers.map(header => `<tr>
+          <td><strong>${escapeHtml(header)}</strong></td>
+          <td><select data-admission-map="${escapeAttr(header)}">${options.map(([value, label]) => `<option value="${value}" ${value === guessAdmissionField(header) ? "selected" : ""}>${label}</option>`).join("")}</select></td>
+          <td><input data-admission-custom="${escapeAttr(header)}" placeholder="e.g. Admission Roll No." value="${escapeAttr(header)}"></td>
+          <td>${escapeHtml(firstNonBlank(rows, header))}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+  document.getElementById("admissionMapping").innerHTML = html;
+  renderAdmissionPreview();
+  document.querySelectorAll("[data-admission-map]").forEach(select => {
+    select.addEventListener("change", () => {
+      updateAdmissionCustomInputs();
+      renderAdmissionPreview();
+    });
+  });
+  document.querySelectorAll("[data-admission-custom]").forEach(input => input.addEventListener("input", renderAdmissionPreview));
+  updateAdmissionCustomInputs();
+}
+
+function renderAdmissionPreview() {
+  const rows = (admissionSheetPayload?.rows || []).slice(0, 5);
+  const mapping = collectAdmissionMapping();
+  const customNames = collectAdmissionCustomNames();
+  const preview = rows.map(row => admissionRowToData(row, admissionSheetPayload.headers || [], mapping, customNames));
+  table("admissionPreview", preview, ["Preview Name", "Mobile", "Course", "Batch", "Branch", "Admission Date", "Sheet Tab", "Match"], data => [
+    data.name,
+    data.mobile,
+    data.course,
+    data.batch,
+    data.branch,
+    data.admissionDate,
+    data.sheetName,
+    findAdmissionLeadMatch(data) ? "Existing lead" : "New admitted lead"
+  ]);
+}
+
+function admissionMappingOptions() {
+  return [
+    ["", "Ignore"],
+    ["studentName", "Student Name"],
+    ["firstName", "First Name"],
+    ["lastName", "Last Name"],
+    ["studentMobile", "Student Mobile"],
+    ["parentMobile", "Parent Mobile"],
+    ["email", "Email"],
+    ["course", "Course"],
+    ["batch", "Batch"],
+    ["branch", "Branch / Location"],
+    ["admissionDate", "Admission Date"],
+    ["feesAgreed", "Fees Agreed"],
+    ["feesPaid", "Fees Paid"],
+    ["paymentMode", "Payment Mode"],
+    ["receiptNumber", "Receipt Number"],
+    ["counsellor", "Admission Counsellor"],
+    ["remarks", "Remarks"],
+    ["custom", "Custom Field"]
+  ];
+}
+
+function guessAdmissionField(header) {
+  const label = normalizeHeader(header);
+  if (/first.*name/.test(label)) return "firstName";
+  if (/last.*name|surname/.test(label)) return "lastName";
+  if (/student.*name|full.*name|candidate.*name|^name$/.test(label)) return "studentName";
+  if (/mobile|phone|contact|whatsapp/.test(label)) return "studentMobile";
+  if (/parent|father|mother|guardian/.test(label)) return "parentMobile";
+  if (/mail/.test(label)) return "email";
+  if (/course|cma|foundation|inter|final/.test(label)) return "course";
+  if (/batch/.test(label)) return "batch";
+  if (/branch|location|centre|center|address/.test(label)) return "branch";
+  if (/admission.*date|date.*admission|joined.*date|date/.test(label)) return "admissionDate";
+  if (/agreed|total.*fees|fees/.test(label)) return "feesAgreed";
+  if (/paid|received|amount/.test(label)) return "feesPaid";
+  if (/mode|payment/.test(label)) return "paymentMode";
+  if (/receipt|invoice|bill/.test(label)) return "receiptNumber";
+  if (/counsellor|counselor|admin|admission.*by/.test(label)) return "counsellor";
+  if (/remark|note|comment/.test(label)) return "remarks";
+  return "";
+}
+
+function collectAdmissionMapping() {
+  const mapping = {};
+  document.querySelectorAll("[data-admission-map]").forEach(select => {
+    if (select.value) mapping[select.dataset.admissionMap] = select.value;
+  });
+  return mapping;
+}
+
+function collectAdmissionCustomNames() {
+  const customNames = {};
+  document.querySelectorAll("[data-admission-custom]").forEach(input => {
+    const header = input.dataset.admissionCustom;
+    const mappedAs = document.querySelector(`[data-admission-map="${cssEscape(header)}"]`)?.value;
+    if (mappedAs === "custom") customNames[header] = input.value.trim() || header;
+  });
+  return customNames;
+}
+
+function updateAdmissionCustomInputs() {
+  document.querySelectorAll("[data-admission-custom]").forEach(input => {
+    const header = input.dataset.admissionCustom;
+    const mappedAs = document.querySelector(`[data-admission-map="${cssEscape(header)}"]`)?.value;
+    input.disabled = mappedAs !== "custom";
+  });
+}
+
+function confirmImportAdmissionSheet() {
+  if (!admissionSheetPayload) return;
+  const mapping = collectAdmissionMapping();
+  if (!Object.values(mapping).includes("studentMobile") && !Object.values(mapping).includes("studentName")) {
+    alert("Please tag Student Mobile or Student Name before importing admissions.");
+    return;
+  }
+  const overwrite = Boolean(document.getElementById("admissionOverwrite")?.checked);
+  if (!confirm(`Import/update ${admissionSheetPayload.rows.length} admission rows?`)) return;
+  const result = importAdmissionSheetRows(admissionSheetPayload.rows, admissionSheetPayload.headers, mapping, {
+    overwrite,
+    customNames: collectAdmissionCustomNames()
+  });
+  save();
+  render();
+  document.getElementById("admissionSheetDialog").close();
+  syncAdmissionsAfterLegacy = false;
+  setSheetStatus(`Admission sheet updated: ${result.matched} matched, ${result.created} new leads, ${result.admissions} admissions, ${result.skipped} skipped.`);
+  alert(`Admissions updated.\nMatched leads: ${result.matched}\nNew admitted leads: ${result.created}\nAdmission records created/updated: ${result.admissions}\nSkipped rows: ${result.skipped}`);
+}
+
+function importAdmissionSheetRows(rows, headers, mapping, options = {}) {
+  const stamp = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  let matched = 0;
+  let created = 0;
+  let admissions = 0;
+  let skipped = 0;
+  rows.forEach(row => {
+    const data = admissionRowToData(row, headers, mapping, options.customNames || {});
+    if (!data.mobile && !data.name) {
+      skipped += 1;
+      return;
+    }
+    let lead = findAdmissionLeadMatch(data);
+    const remark = `[${stamp}] Admission sheet match from ${data.sheetName}, row ${row._rowNumber || ""}\n${admissionRowRemark(row, headers)}`;
+    if (lead) {
+      matched += 1;
+      mergeAdmissionDataIntoLead(lead, data, options);
+      lead.remarks = appendRemark(lead.remarks, remark);
+    } else {
+      lead = createLeadFromAdmissionData(data, remark);
+      state.leads.unshift(lead);
+      created += 1;
+    }
+    if (upsertAdmissionFromSheet(lead, data)) admissions += 1;
+  });
+  return { matched, created, admissions, skipped };
+}
+
+function admissionRowToData(row, headers, mapping, customNames = {}) {
+  const values = mappedLegacyValues(row, headers, mapping);
+  const customFields = mappedLegacyCustomFields(row, headers, mapping, customNames);
+  const sheetName = row._sheetName || "";
+  const rowText = headers.map(header => row[header]).filter(Boolean).join("\n");
+  const name = values.studentName || [values.firstName, values.lastName].filter(Boolean).join(" ") || inferName(rowText);
+  const courseText = values.course || sheetName;
+  const batch = values.batch || sheetName || "";
+  const branch = values.branch || detectBranch(rowText, rowText) || "Unassigned";
+  const mobile = onlyPhone(values.studentMobile) || onlyPhone(rowText);
+  Object.keys(customFields).forEach(field => addUnique(state.customLeadFields, field));
+  return {
+    name: titleCase(name || "Unknown Student"),
+    firstName: titleCase(values.firstName || firstNameOf(name || "Unknown Student")),
+    lastName: titleCase(values.lastName || String(name || "").trim().split(/\s+/).slice(1).join(" ")),
+    mobile,
+    parentMobile: onlyPhone(values.parentMobile),
+    email: values.email || "",
+    course: detectCourse(courseText),
+    batch,
+    branch,
+    admissionDate: parseDateForInput(values.admissionDate) || todayDate(),
+    feesAgreed: values.feesAgreed || "",
+    feesPaid: values.feesPaid || "",
+    paymentMode: values.paymentMode || "",
+    receiptNumber: values.receiptNumber || "",
+    counsellor: matchAdminName(values.counsellor) || currentUser?.name || state.users[0]?.name || "",
+    remarks: values.remarks || "",
+    customFields,
+    sheetName
+  };
+}
+
+function findAdmissionLeadMatch(data) {
+  if (data.mobile) {
+    const byMobile = state.leads.find(lead => lead.studentMobile === data.mobile || lead.parentMobile === data.mobile);
+    if (byMobile) return byMobile;
+  }
+  const normalizedName = normalizePersonName(data.name);
+  if (!normalizedName) return null;
+  return state.leads.find(lead => normalizePersonName(displayLeadName(lead)) === normalizedName) || null;
+}
+
+function mergeAdmissionDataIntoLead(lead, data, options = {}) {
+  const overwrite = options.overwrite;
+  const updates = {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    studentName: data.name,
+    studentMobile: data.mobile,
+    parentMobile: data.parentMobile,
+    email: data.email,
+    course: data.course,
+    branch: data.branch,
+    batch: data.batch
+  };
+  Object.entries(updates).forEach(([key, value]) => {
+    if ((overwrite || !lead[key]) && value) lead[key] = value;
+  });
+  lead.status = "Converted / Admitted";
+  lead.lastTouchedAt = new Date().toISOString();
+  lead.lastTouchType = "Admission";
+  lead.customFields = { ...(lead.customFields || {}), ...(data.customFields || {}) };
+}
+
+function createLeadFromAdmissionData(data, remark) {
+  return {
+    id: id(),
+    firstName: data.firstName,
+    lastName: data.lastName,
+    studentName: data.name,
+    studentMobile: data.mobile,
+    parentMobile: data.parentMobile,
+    email: data.email,
+    location: "",
+    branch: data.branch,
+    course: data.course,
+    attempt: "",
+    academicBackground: "",
+    currentQualification: "",
+    college: "",
+    source: "Admission Sheet",
+    leadSource: "Admission Sheet",
+    assignedTo: data.counsellor,
+    status: "Converted / Admitted",
+    followupAt: "",
+    createdAt: new Date().toISOString(),
+    lastTouchedAt: new Date().toISOString(),
+    lastTouchType: "Admission",
+    batch: data.batch,
+    customFields: data.customFields || {},
+    remarks: appendRemark(remark, data.remarks)
+  };
+}
+
+function upsertAdmissionFromSheet(lead, data) {
+  const existing = state.admissions.find(admission => admission.leadId === lead.id);
+  const payload = {
+    leadId: lead.id,
+    admissionDate: data.admissionDate || todayDate(),
+    course: data.course || lead.course || "",
+    batch: data.batch || lead.batch || "Unassigned",
+    feesAgreed: data.feesAgreed || "",
+    feesPaid: data.feesPaid || "",
+    paymentMode: data.paymentMode || "",
+    receiptNumber: data.receiptNumber || "",
+    counsellor: data.counsellor || lead.assignedTo || "",
+    remarks: appendRemark(`Imported from admission sheet: ${data.sheetName}`, data.remarks)
+  };
+  if (payload.batch && payload.batch !== "Unassigned") addUnique(masters.batches, payload.batch);
+  if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
+  if (existing) {
+    Object.assign(existing, { ...payload, id: existing.id });
+  } else {
+    state.admissions.unshift({ id: id(), ...payload });
+  }
+  lead.status = "Converted / Admitted";
+  lead.batch = payload.batch;
+  lead.branch = data.branch || lead.branch;
+  return true;
+}
+
+function admissionRowRemark(row, headers) {
+  return headers.filter(header => header && row[header]).map(header => `${header}: ${row[header]}`).join("\n");
+}
+
+function normalizePersonName(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z]/g, "").trim();
+}
+
+function parseDateForInput(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  const parts = String(value).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (!parts) return "";
+  const year = parts[3].length === 2 ? `20${parts[3]}` : parts[3];
+  const date = new Date(`${year}-${parts[2].padStart(2, "0")}-${parts[1].padStart(2, "0")}`);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
 function getThemeSetting() {
@@ -2451,7 +2820,10 @@ function routeActions(e) {
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
   if (button.dataset.saveToSheet !== undefined) saveToSheet();
   if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
+  if (button.dataset.updateAdmissionSheet !== undefined) updateFromAdmissionGoogleSheet();
+  if (button.dataset.syncLeadsAdmissions !== undefined) syncLeadsAndAdmissions();
   if (button.dataset.importLegacySheet !== undefined) confirmImportLegacySheet();
+  if (button.dataset.importAdmissionSheet !== undefined) confirmImportAdmissionSheet();
   if (button.dataset.clearTargetForm !== undefined) {
     if (!confirm("Clear the target plan form? Unsaved entries in this form will be removed.")) return;
     clearTargetForm();
