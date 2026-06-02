@@ -152,6 +152,12 @@ textarea { width: 100%; resize: vertical; }
   display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr));
   gap: 14px; margin-bottom: 18px;
 }
+.metric-grid.compact {
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+}
+.metric-grid.compact .metric strong {
+  font-size: 20px;
+}
 .metric {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   padding: 16px;
@@ -243,6 +249,17 @@ td.actions { white-space: nowrap; }
   width: 100%;
   min-width: 0;
   padding: 8px;
+}
+#campaignTable table {
+  min-width: 1180px;
+}
+#campaignTable th,
+#campaignTable td {
+  line-height: 1.25;
+}
+#campaignTable select[data-campaign-action] {
+  width: 100%;
+  min-width: 190px;
 }
 .pill { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 12px; }
 .danger { color: var(--red); }

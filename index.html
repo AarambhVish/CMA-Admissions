@@ -128,6 +128,60 @@
       <div id="targetPlans"></div>
     </section>
 
+    <section id="campaigns" class="page">
+      <div class="split">
+        <section class="panel">
+          <h2>Campaign Entry</h2>
+          <p class="bulk-help">Lead Manager can save WhatsApp campaigns, webinar/seminar responses, attendance, and create follow-up leads from the same data.</p>
+          <form id="campaignForm" class="form-grid">
+            <input type="hidden" name="id">
+            <input name="title" placeholder="Campaign title e.g. CMA Webinar 2 June 2026" required>
+            <div class="form-grid two">
+              <label>Campaign Date<input name="campaignDate" type="date" required></label>
+              <label>Campaign Type
+                <select name="type">
+                  <option>WhatsApp Campaign</option>
+                  <option>Webinar</option>
+                  <option>Seminar</option>
+                  <option>College Activity</option>
+                  <option>Calling Campaign</option>
+                </select>
+              </label>
+              <label>Course<select name="course"></select></label>
+              <label>Attempt<input name="attempt" placeholder="June 2027 / December 2026"></label>
+              <label>Branch / Location<select name="branch"></select></label>
+              <label>Assigned Follow-up Admin<select name="assignedTo"></select></label>
+              <label>Flyer Shared<input name="flyer" placeholder="Flyer name or link"></label>
+              <label>Next Follow-up<input name="followupAt" type="datetime-local"></label>
+            </div>
+            <label>Message Sent<textarea name="message" rows="7" placeholder="Paste WhatsApp campaign message"></textarea></label>
+            <label>Data On Which Message Sent<textarea name="sentData" rows="5" placeholder="Paste mobile numbers, names, Excel copied data, or raw list"></textarea></label>
+            <label>Response Received<textarea name="responseData" rows="5" placeholder="Paste students who replied or showed interest"></textarea></label>
+            <label>Seminar / Webinar Attended<textarea name="attendedData" rows="5" placeholder="Paste attendee list or mobile numbers"></textarea></label>
+            <label>Campaign Notes<textarea name="notes" rows="3" placeholder="Manager notes, doubts asked, outcome, next action"></textarea></label>
+            <div class="modal-actions">
+              <button type="button" data-clear-campaign-form>Clear</button>
+              <button class="primary">Save Campaign</button>
+            </div>
+          </form>
+        </section>
+        <section class="panel">
+          <h2>Campaign Follow-up Method</h2>
+          <div class="metric-grid compact">
+            <div class="metric"><span>Save</span><strong>Message</strong></div>
+            <div class="metric"><span>Track</span><strong>Response</strong></div>
+            <div class="metric"><span>Mark</span><strong>Attendance</strong></div>
+            <div class="metric"><span>Convert</span><strong>Leads</strong></div>
+          </div>
+          <p class="bulk-help">Use responses for interested leads. Use attended data for webinar/seminar students. The CRM will tag the lead source as campaign and keep the campaign name for reporting.</p>
+        </section>
+      </div>
+      <div class="toolbar">
+        <button id="exportCampaigns">Export Campaigns CSV</button>
+      </div>
+      <div id="campaignTable" class="table-wrap"></div>
+    </section>
+
     <section id="whatsapp" class="page">
       <div class="split">
         <section class="panel">

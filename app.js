@@ -6,6 +6,7 @@ const tabs = [
   ["followups", "Follow-ups"],
   ["admissions", "Admissions"],
   ["targets", "Targets & Promotion"],
+  ["campaigns", "Campaigns"],
   ["whatsapp", "WhatsApp Templates"],
   ["reports", "Reports"],
   ["users", "Users / Admins"],
@@ -79,6 +80,7 @@ const seed = {
   leads: [],
   followups: [],
   admissions: [],
+  campaigns: [],
   users: [],
   templates: [],
   targets: [],
@@ -114,6 +116,7 @@ function load() {
     batches: loaded.masters?.batches || []
   };
   loaded.targets = loaded.targets || [];
+  loaded.campaigns = loaded.campaigns || [];
   if (!loaded.planningSeeded) {
     ensureProvidedPlanning(loaded);
     loaded.planningSeeded = true;
@@ -234,6 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadCurrentUser();
   applyTheme(getThemeSetting());
   if (getSheetSyncSettings().auto && getSheetSyncSettings().url) loadFromSheet({ silent: true });
+  clearCampaignForm();
   render();
 });
 
@@ -267,12 +271,14 @@ function bindEvents() {
   document.getElementById("admissionForm").addEventListener("submit", saveAdmission);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
   document.getElementById("targetPlanForm").addEventListener("submit", saveTargetPlan);
+  document.getElementById("campaignForm").addEventListener("submit", saveCampaign);
   document.getElementById("templateForm").addEventListener("submit", saveTemplate);
   document.getElementById("userForm").addEventListener("submit", saveUser);
   document.getElementById("parseBulk").addEventListener("click", parseBulk);
   document.getElementById("saveBulk").addEventListener("click", saveBulk);
   document.getElementById("exportLeads").addEventListener("click", () => exportCsv("leads.csv", activeLeads()));
   document.getElementById("exportAdmissions").addEventListener("click", () => exportCsv("admissions.csv", admissionsWithLead()));
+  document.getElementById("exportCampaigns").addEventListener("click", () => exportCsv("campaigns.csv", campaignExportRows()));
   document.body.addEventListener("click", routeActions);
   document.body.addEventListener("change", routeSelectActions);
 }
@@ -315,6 +321,7 @@ function render() {
   renderFollowups();
   renderAdmissions();
   renderTargetPlans();
+  renderCampaigns();
   renderTemplates();
   renderReports();
   renderUsers();
@@ -351,6 +358,7 @@ function renderDashboard() {
     ["New leads", countBy(leads, "status")["New Lead"] || 0],
     ["Contacted", countBy(leads, "status")["Contacted"] || 0],
     ["Untouched leads", untouched.length],
+    ["Campaigns", state.campaigns.length],
     ["Pending follow-ups", pending],
     ["Overdue follow-ups", overdue],
     ["Converted", converted],
@@ -458,6 +466,60 @@ function renderAdmissions() {
   table("admissionTable", admissionsWithLead(), ["Student", "Mobile", "Course", "Batch", "Admission date", "Fees", "Paid", "Balance", "Mode", "Receipt", "Counsellor"], r => [
     displayLeadName(r), r.studentMobile, r.course, r.batch, r.admissionDate, money(r.feesAgreed), money(r.feesPaid), money(r.balance), r.paymentMode, r.receiptNumber, r.counsellor
   ]);
+}
+
+function renderCampaigns() {
+  const canManage = canManageCampaigns();
+  const form = document.getElementById("campaignForm");
+  if (form) {
+    form.querySelectorAll("input, select, textarea, button").forEach(input => {
+      if (input.dataset.clearCampaignForm !== undefined) return;
+      input.disabled = !canManage;
+    });
+    const help = document.querySelector("#campaigns .bulk-help");
+    if (help && !canManage) help.textContent = "Campaigns are managed by Lead Manager / Super Admin. Counsellors can view campaign progress here.";
+  }
+  const rows = state.campaigns.map(campaign => campaignStats(campaign));
+  table("campaignTable", rows, ["Date", "Campaign", "Type", "Course", "Attempt", "Sent", "Responses", "Attended", "Leads", "Converted", "Next Follow-up", "Owner", "Actions"], row => [
+    formatDate(row.campaignDate),
+    `<strong>${escapeHtml(row.title)}</strong><br><span class="muted">${escapeHtml(row.flyer || "No flyer added")}</span>`,
+    row.type,
+    row.course,
+    row.attempt,
+    row.sentCount,
+    row.responseCount,
+    row.attendedCount,
+    row.leadCount,
+    row.convertedCount,
+    formatDate(row.followupAt),
+    row.assignedTo,
+    campaignActions(row)
+  ]);
+}
+
+function campaignActions(row) {
+  if (!canManageCampaigns()) return "<span class='locked-action'>View only</span>";
+  return `<select data-campaign-action="${row.id}">
+    <option value="">Action</option>
+    <option value="edit">Edit</option>
+    <option value="responseLeads">Create Leads From Responses</option>
+    <option value="attendeeLeads">Create Leads From Attendees</option>
+    <option value="openWa">Open WhatsApp Message</option>
+    <option value="delete">Delete</option>
+  </select>`;
+}
+
+function campaignStats(campaign) {
+  const linkedLeads = activeLeads().filter(lead => lead.campaignId === campaign.id);
+  const converted = linkedLeads.filter(lead => lead.status === "Converted / Admitted").length;
+  return {
+    ...campaign,
+    sentCount: countCampaignPeople(campaign.sentData),
+    responseCount: countCampaignPeople(campaign.responseData),
+    attendedCount: countCampaignPeople(campaign.attendedData),
+    leadCount: linkedLeads.length,
+    convertedCount: converted
+  };
 }
 function admissionsWithLead() {
   return state.admissions
@@ -899,6 +961,185 @@ function currentAdmissionsFor(branch, course, attempt) {
     normalizeCourseName(row.course || "") === normalizeCourseName(course || "") &&
     (row.attempt || "").toLowerCase() === (attempt || "").toLowerCase()
   ).length;
+}
+
+function saveCampaign(e) {
+  e.preventDefault();
+  if (!canManageCampaigns()) {
+    alert("Only Lead Manager or Super Admin can create or edit campaigns.");
+    return;
+  }
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const existing = data.id ? state.campaigns.find(c => c.id === data.id) : null;
+  data.title = data.title.trim();
+  data.createdBy = existing?.createdBy || currentUser?.name || "";
+  data.createdAt = existing?.createdAt || new Date().toISOString();
+  data.updatedAt = new Date().toISOString();
+  ensureCampaignMasters(data);
+  if (data.id) {
+    state.campaigns = state.campaigns.map(campaign => campaign.id === data.id ? { ...campaign, ...data } : campaign);
+  } else {
+    delete data.id;
+    state.campaigns.unshift({ id: id(), ...data });
+  }
+  save();
+  clearCampaignForm();
+  render();
+}
+
+function clearCampaignForm() {
+  const form = document.getElementById("campaignForm");
+  if (!form) return;
+  form.reset();
+  form.elements.campaignDate.value = todayDate();
+  form.elements.followupAt.value = nextDayInputValue();
+  if (masters.courses[0]) form.elements.course.value = masters.courses[0];
+  if (withUnassigned(masters.branches)[0]) form.elements.branch.value = withUnassigned(masters.branches)[0];
+  if (state.users[0]) form.elements.assignedTo.value = state.users[0].name;
+}
+
+function editCampaign(campaignId) {
+  const campaign = state.campaigns.find(c => c.id === campaignId);
+  const form = document.getElementById("campaignForm");
+  if (!campaign || !form) return;
+  activeTab = "campaigns";
+  render();
+  Object.entries(campaign).forEach(([key, value]) => {
+    if (form.elements[key]) form.elements[key].value = value || "";
+  });
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function handleCampaignAction(campaignId, action) {
+  if (!canManageCampaigns()) {
+    alert("Only Lead Manager or Super Admin can manage campaigns.");
+    return;
+  }
+  if (action === "edit") editCampaign(campaignId);
+  if (action === "responseLeads") createLeadsFromCampaign(campaignId, "responseData");
+  if (action === "attendeeLeads") createLeadsFromCampaign(campaignId, "attendedData");
+  if (action === "openWa") openCampaignWhatsApp(campaignId);
+  if (action === "delete") deleteCampaign(campaignId);
+}
+
+function createLeadsFromCampaign(campaignId, dataKey) {
+  const campaign = state.campaigns.find(c => c.id === campaignId);
+  if (!campaign) return;
+  const blocks = splitCampaignLeadBlocks(campaign[dataKey] || "");
+  if (!blocks.length) {
+    alert("No student/mobile data found in this campaign section.");
+    return;
+  }
+  ensureCampaignMasters(campaign);
+  const newLeads = blocks
+    .map(block => campaignLeadFromBlock(block, campaign, dataKey))
+    .filter(lead => !lead.duplicate);
+  const duplicateCount = blocks.length - newLeads.length;
+  if (!newLeads.length) {
+    alert("All detected campaign leads are already present by mobile number.");
+    return;
+  }
+  state.leads.unshift(...newLeads.map(({ duplicate, rawText, ...lead }) => lead));
+  campaign.lastLeadCreatedAt = new Date().toISOString();
+  save();
+  render();
+  alert(`${newLeads.length} campaign lead(s) created.${duplicateCount ? ` ${duplicateCount} duplicate(s) skipped.` : ""}`);
+}
+
+function campaignLeadFromBlock(block, campaign, dataKey) {
+  const lead = parseLeadBlock(block);
+  addUnique(masters.sources, "WhatsApp campaign");
+  lead.campaignId = campaign.id;
+  lead.campaignTitle = campaign.title;
+  lead.leadSource = `Campaign: ${campaign.title}`;
+  lead.source = "WhatsApp campaign";
+  lead.course = campaign.course || lead.course;
+  lead.attempt = campaign.attempt || lead.attempt;
+  lead.branch = campaign.branch || lead.branch || "Unassigned";
+  lead.assignedTo = campaign.assignedTo || lead.assignedTo;
+  lead.followupAt = campaign.followupAt || nextDayInputValue();
+  lead.status = dataKey === "attendedData" ? "Demo Attended" : "Interested";
+  lead.remarks = [
+    `Campaign: ${campaign.title}`,
+    dataKey === "attendedData" ? "Marked from webinar/seminar attended data." : "Marked from campaign response data.",
+    block
+  ].join("\n");
+  lead.createdAt = new Date().toISOString();
+  lead.lastTouchedAt = "";
+  lead.lastTouchType = "";
+  lead.duplicate = Boolean(lead.studentMobile && state.leads.some(l => l.studentMobile === lead.studentMobile));
+  return lead;
+}
+
+function openCampaignWhatsApp(campaignId) {
+  const campaign = state.campaigns.find(c => c.id === campaignId);
+  if (!campaign) return;
+  const numbers = uniquePhones(campaign.sentData || campaign.responseData || campaign.attendedData);
+  if (!numbers.length) {
+    alert("Add mobile numbers in campaign data first.");
+    return;
+  }
+  window.open(`https://wa.me/91${numbers[0]}?text=${encodeURIComponent(campaign.message || "")}`, "_blank");
+}
+
+function deleteCampaign(campaignId) {
+  const campaign = state.campaigns.find(c => c.id === campaignId);
+  if (!campaign || !confirm(`Delete campaign "${campaign.title}"? Leads already created from it will remain.`)) return;
+  state.campaigns = state.campaigns.filter(c => c.id !== campaignId);
+  save();
+  render();
+}
+
+function ensureCampaignMasters(campaign) {
+  if (campaign.course) addUnique(masters.courses, campaign.course);
+  if (campaign.branch && campaign.branch !== "Unassigned") addUnique(masters.branches, campaign.branch);
+  addUnique(masters.sources, "WhatsApp campaign");
+}
+
+function canManageCampaigns() {
+  return isSuperAdmin() || isLeadManager();
+}
+
+function countCampaignPeople(text) {
+  const phones = uniquePhones(text);
+  if (phones.length) return phones.length;
+  return splitCampaignLeadBlocks(text || "").length;
+}
+
+function uniquePhones(text) {
+  return [...new Set(String(text || "").match(/\b[6-9]\d{9}\b/g) || [])];
+}
+
+function splitCampaignLeadBlocks(text) {
+  const normalized = String(text || "").replace(/\r/g, "").trim();
+  if (!normalized) return [];
+  const lines = normalized.split("\n").map(line => line.trim()).filter(Boolean);
+  const phoneLines = lines.filter(line => /\b[6-9]\d{9}\b/.test(line));
+  if (phoneLines.length > 1) return phoneLines;
+  return splitLeadBlocks(normalized);
+}
+
+function campaignExportRows() {
+  return state.campaigns.map(campaign => {
+    const stats = campaignStats(campaign);
+    return {
+      title: stats.title,
+      campaignDate: stats.campaignDate,
+      type: stats.type,
+      course: stats.course,
+      attempt: stats.attempt,
+      branch: stats.branch,
+      flyer: stats.flyer,
+      sentCount: stats.sentCount,
+      responseCount: stats.responseCount,
+      attendedCount: stats.attendedCount,
+      leadCount: stats.leadCount,
+      convertedCount: stats.convertedCount,
+      assignedTo: stats.assignedTo,
+      followupAt: stats.followupAt,
+      notes: stats.notes
+    };
+  });
 }
 
 function table(idName, rows, headings, mapRow) {
@@ -1420,6 +1661,7 @@ function routeActions(e) {
   if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
   if (button.dataset.saveToSheet !== undefined) saveToSheet();
+  if (button.dataset.clearCampaignForm !== undefined) clearCampaignForm();
   if (button.dataset.deleteTarget) {
     state.targets = state.targets.filter(t => t.id !== button.dataset.deleteTarget);
     save();
@@ -1438,6 +1680,14 @@ function routeSelectActions(e) {
     return;
   }
   const select = e.target.closest("[data-row-action]");
+  const campaignSelect = e.target.closest("[data-campaign-action]");
+  if (campaignSelect && campaignSelect.value) {
+    const campaignId = campaignSelect.dataset.campaignAction;
+    const action = campaignSelect.value;
+    campaignSelect.value = "";
+    handleCampaignAction(campaignId, action);
+    return;
+  }
   if (!select || !select.value) return;
   const leadId = select.dataset.rowAction;
   const action = select.value;
