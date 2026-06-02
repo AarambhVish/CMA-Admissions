@@ -82,7 +82,6 @@
       <div class="toolbar">
         <button class="primary" data-open-form>Add Manual Lead</button>
         <button data-open-bulk>Bulk Paste Import</button>
-        <button id="exportLeads">Export Leads CSV</button>
       </div>
       <div class="filters" id="leadFilters"></div>
       <div id="leadTable" class="table-wrap"></div>
@@ -102,22 +101,23 @@
     </section>
 
     <section id="admissions" class="page">
-      <div class="toolbar">
-        <button id="exportAdmissions">Export Admissions CSV</button>
-      </div>
       <div id="admissionTable" class="table-wrap"></div>
     </section>
 
     <section id="targets" class="page">
       <div class="split">
         <section class="panel">
-          <h2>Create Target Plan</h2>
+          <h2 id="targetPlanTitle">Create Target Plan</h2>
           <form id="targetPlanForm" class="form-grid">
+            <input type="hidden" name="id">
             <input name="title" placeholder="Plan name e.g. CMA Target & Promotion Dec 26, June 27" required>
             <select name="course"></select>
             <input name="attempt" placeholder="Attempt e.g. June 2027" required>
             <textarea name="branchTargets" rows="8" placeholder="Branch targets, one per line e.g.&#10;Borivali,99,150&#10;Andheri,40,80&#10;Online,7,25&#10;&#10;Format: Branch, Current, Target"></textarea>
-            <button class="primary">Save Plan</button>
+            <div class="modal-actions">
+              <button type="button" data-clear-target-form>Clear</button>
+              <button class="primary">Save Plan</button>
+            </div>
           </form>
         </section>
         <section class="panel">
@@ -176,9 +176,6 @@
           <p class="bulk-help">Use responses for interested leads. Use attended data for webinar/seminar students. The CRM will tag the lead source as campaign and keep the campaign name for reporting.</p>
         </section>
       </div>
-      <div class="toolbar">
-        <button id="exportCampaigns">Export Campaigns CSV</button>
-      </div>
       <div id="campaignTable" class="table-wrap"></div>
     </section>
 
@@ -236,6 +233,7 @@
               <option>Counsellor / Admin</option>
             </select>
             <select name="branch"></select>
+            <div id="userTabAccess" class="access-list"></div>
             <button class="primary">Save User</button>
           </form>
         </section>
@@ -327,6 +325,10 @@
             <label>Remark<textarea name="remarks" rows="3" placeholder="Admin remarks"></textarea></label>
           </div>
         </section>
+        <section class="form-section hidden" id="leadCustomFieldsSection">
+          <h3>Custom Fields</h3>
+          <div class="form-grid three" id="leadCustomFields"></div>
+        </section>
       </div>
       <p id="duplicateWarning" class="warning hidden"></p>
       <div class="modal-actions">
@@ -414,6 +416,23 @@
         <button class="primary">Save Assignment</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="legacySheetDialog">
+    <div class="modal-form">
+      <div class="modal-head">
+        <h2>Map Old Google Sheet Columns</h2>
+        <button type="button" class="ghost" data-close-legacy-sheet>Close</button>
+      </div>
+      <p class="bulk-help">Tag each old sheet column before importing. Use Admin Assigned for columns like Enquiry Given By. Course columns will be converted to CMA Foundation / CMA Intermediate / CMA Final wherever possible.</p>
+      <label><input id="legacyOverwrite" type="checkbox" checked> Overwrite existing lead fields with mapped Google Sheet values</label>
+      <div id="legacyMapping" class="table-wrap"></div>
+      <div id="legacyPreview" class="table-wrap"></div>
+      <div class="modal-actions">
+        <button type="button" data-close-legacy-sheet>Cancel</button>
+        <button type="button" class="primary" data-import-legacy-sheet>Import / Update Leads</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="app.js"></script>

@@ -14,6 +14,19 @@ const tabs = [
   ["settings", "Master Settings"]
 ];
 
+const defaultLeadColumns = [
+  { key: "createdAt", label: "Date Added" },
+  { key: "leadAge", label: "Age of Lead" },
+  { key: "lastEdited", label: "Last Edited" },
+  { key: "name", label: "Name" },
+  { key: "studentMobile", label: "Mobile No." },
+  { key: "course", label: "Course" },
+  { key: "attempt", label: "Attempt" },
+  { key: "branch", label: "Branch" },
+  { key: "followupAt", label: "Next Follow-up" },
+  { key: "actions", label: "Actions" }
+];
+
 const defaultMasters = {
   courses: ["CMA Foundation", "CMA Intermediate", "CMA Final"],
   branches: ["Andheri", "Borivali", "Dadar", "Thane", "Online"],
@@ -85,6 +98,8 @@ const seed = {
   users: [],
   templates: [],
   targets: [],
+  leadColumns: structuredClone(defaultLeadColumns),
+  customLeadFields: [],
   masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [] }
 };
 
@@ -96,6 +111,7 @@ let currentUser = null;
 let syncTimer = null;
 let periodicSyncTimer = null;
 let isCloudLoading = false;
+let legacySheetPayload = null;
 
 function id() { return Math.random().toString(36).slice(2, 10); }
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -109,22 +125,37 @@ function load() {
     return structuredClone(seed);
   }
   const loaded = JSON.parse(raw);
-  loaded.masters = {
-    courses: loaded.masters?.courses || [],
-    branches: loaded.masters?.branches || [],
-    sources: mergeReferenceOptions(loaded.masters?.sources || []),
-    statuses: loaded.masters?.statuses || [],
-    roles: loaded.masters?.roles || [],
-    batches: loaded.masters?.batches || []
-  };
-  loaded.targets = loaded.targets || [];
-  loaded.campaigns = loaded.campaigns || [];
+  normalizeStateDefaults(loaded);
   if (!loaded.planningSeeded) {
     ensureProvidedPlanning(loaded);
     loaded.planningSeeded = true;
     localStorage.setItem(storeKey, JSON.stringify(loaded));
   }
   return loaded;
+}
+
+function normalizeStateDefaults(data) {
+  data.leads = data.leads || [];
+  data.followups = data.followups || [];
+  data.admissions = data.admissions || [];
+  data.campaigns = data.campaigns || [];
+  data.users = data.users || [];
+  data.templates = data.templates || [];
+  data.targets = data.targets || [];
+  data.masters = {
+    courses: data.masters?.courses || [],
+    branches: data.masters?.branches || [],
+    sources: mergeReferenceOptions(data.masters?.sources || []),
+    statuses: data.masters?.statuses || [],
+    roles: data.masters?.roles || [],
+    batches: data.masters?.batches || []
+  };
+  data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
+  data.customLeadFields = Array.isArray(data.customLeadFields) ? data.customLeadFields : [];
+  data.leads.forEach(lead => {
+    if (!lead.customFields) lead.customFields = {};
+    Object.keys(lead.customFields).forEach(field => addUnique(data.customLeadFields, field));
+  });
 }
 function save() {
   state.masters = masters;
@@ -245,7 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function renderTabs() {
   const nav = document.getElementById("tabs");
-  nav.innerHTML = tabs.map(([key, label]) => `<button data-tab="${key}">${label}</button>`).join("");
+  nav.innerHTML = accessibleTabs().map(([key, label]) => `<button data-tab="${key}">${label}</button>`).join("");
 }
 
 function bindEvents() {
@@ -266,6 +297,7 @@ function bindEvents() {
   document.querySelectorAll("[data-close-followup]").forEach(b => b.addEventListener("click", () => document.getElementById("followupDialog").close()));
   document.querySelectorAll("[data-close-admission]").forEach(b => b.addEventListener("click", () => document.getElementById("admissionDialog").close()));
   document.querySelectorAll("[data-close-assign-admin]").forEach(b => b.addEventListener("click", () => document.getElementById("assignAdminDialog").close()));
+  document.querySelectorAll("[data-close-legacy-sheet]").forEach(b => b.addEventListener("click", () => document.getElementById("legacySheetDialog").close()));
   document.getElementById("leadForm").addEventListener("submit", saveLead);
   document.getElementById("educationLevel").addEventListener("change", updateEducationFields);
   document.getElementById("referenceType").addEventListener("change", updateReferenceFields);
@@ -278,9 +310,9 @@ function bindEvents() {
   document.getElementById("userForm").addEventListener("submit", saveUser);
   document.getElementById("parseBulk").addEventListener("click", parseBulk);
   document.getElementById("saveBulk").addEventListener("click", saveBulk);
-  document.getElementById("exportLeads").addEventListener("click", () => exportCsv("leads.csv", activeLeads()));
-  document.getElementById("exportAdmissions").addEventListener("click", () => exportCsv("admissions.csv", admissionsWithLead()));
-  document.getElementById("exportCampaigns").addEventListener("click", () => exportCsv("campaigns.csv", campaignExportRows()));
+  document.getElementById("exportLeads")?.addEventListener("click", () => alert("Export is disabled."));
+  document.getElementById("exportAdmissions")?.addEventListener("click", () => alert("Export is disabled."));
+  document.getElementById("exportCampaigns")?.addEventListener("click", () => alert("Export is disabled."));
   document.body.addEventListener("click", routeActions);
   document.body.addEventListener("change", routeSelectActions);
 }
@@ -310,9 +342,11 @@ function render() {
     updateAuthView();
     return;
   }
+  renderTabs();
+  if (!canSeeTab(activeTab)) activeTab = accessibleTabs()[0]?.[0] || "dashboard";
   document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === activeTab));
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === activeTab));
-  document.getElementById("pageTitle").textContent = tabs.find(t => t[0] === activeTab)[1];
+  document.getElementById("pageTitle").textContent = tabs.find(t => t[0] === activeTab)?.[1] || "Dashboard";
   document.getElementById("addLeadTop").disabled = !currentUser;
   updateAuthView();
   hydrateSelects();
@@ -336,6 +370,20 @@ function activeLeads() {
 
 function archivedLeads() {
   return state.leads.filter(l => l.archivedAt);
+}
+
+function accessibleTabs(user = currentUser) {
+  if (!user || isSuperAdminUser(user)) return tabs;
+  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  return tabs.filter(([key]) => allowed.includes(key));
+}
+
+function canSeeTab(tabKey, user = currentUser) {
+  return accessibleTabs(user).some(([key]) => key === tabKey);
+}
+
+function isSuperAdminUser(user) {
+  return user?.role === "Super Admin";
 }
 
 function filteredLeads(prefix = "lead") {
@@ -427,23 +475,43 @@ function selectFilter(prefix, key, label, values) {
 
 function renderLeadTable() {
   const leads = filteredLeads("lead");
-  table("leadTable", leads, ["Added On", "Lead Age", "Last Touched", "Name", "Mobile", "Course", "Attempt", "Branch", "Lead Source", "Reference", "Ref. Details", "Status", "Admin", "Next follow-up", "Actions"], l => [
-    leadCreatedStamp(l),
-    leadAge(l),
-    untouchedLabel(l),
-    displayLeadName(l),
-    l.studentMobile,
-    l.course,
-    l.attempt || "",
-    l.branch,
-    l.leadSource || "",
-    l.source,
-    referenceDetails(l),
-    statusText(l.status),
-    l.assignedTo,
-    dueLabel(l),
-    actionButtons(l)
-  ]);
+  const columns = activeLeadColumns();
+  table("leadTable", leads, columns.map(column => column.label), lead => columns.map(column => leadColumnValue(lead, column.key)));
+}
+
+function activeLeadColumns() {
+  return (state.leadColumns && state.leadColumns.length ? state.leadColumns : defaultLeadColumns)
+    .filter(column => column?.key)
+    .map(column => ({ key: column.key, label: column.label || leadColumnLabel(column.key) }));
+}
+
+function leadColumnValue(lead, key) {
+  const standard = {
+    createdAt: leadCreatedStamp(lead),
+    leadAge: leadAge(lead),
+    lastEdited: untouchedLabel(lead),
+    name: displayLeadName(lead),
+    firstName: lead.firstName || firstNameOf(displayLeadName(lead)),
+    lastName: lead.lastName || "",
+    studentMobile: lead.studentMobile,
+    parentMobile: lead.parentMobile,
+    email: lead.email,
+    location: lead.location,
+    course: lead.course,
+    attempt: lead.attempt || "",
+    branch: lead.branch,
+    batch: lead.batch,
+    leadSource: lead.leadSource || "",
+    source: lead.source || "",
+    referenceDetails: referenceDetails(lead),
+    status: statusText(lead.status || ""),
+    assignedTo: lead.assignedTo,
+    followupAt: dueLabel(lead),
+    remarks: escapeHtml(lead.remarks || "").replaceAll("\n", "<br>"),
+    actions: actionButtons(lead)
+  };
+  if (Object.prototype.hasOwnProperty.call(standard, key)) return standard[key];
+  return escapeHtml(lead.customFields?.[key] || "");
 }
 
 function renderArchive() {
@@ -555,24 +623,27 @@ function renderGroupReport(idName, leads, key) {
 }
 
 function renderUsers() {
-  table("userList", state.users, ["Name", "Mobile", "Email", "Role", "Branch", "Login", "Actions"], u => [
+  renderUserTabAccess("userTabAccess");
+  table("userList", state.users, ["Name", "Mobile", "Email", "Role", "Branch", "Tabs", "Login", "Actions"], u => [
     u.name,
     u.mobile,
     u.email,
     u.role,
     u.branch,
+    userAccessLabel(u),
     "First name / mobile / email",
-    `<button data-edit-user="${u.id}">Edit</button>`
+    isSuperAdmin() ? `<button data-edit-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
   ]);
 }
 
 function renderSettingsUsers() {
-  table("settingsUserList", state.users, ["Name", "Role", "Branch", "Login", "Actions"], u => [
+  table("settingsUserList", state.users, ["Name", "Role", "Branch", "Tabs", "Login", "Actions"], u => [
     u.name,
     u.role,
     u.branch,
+    userAccessLabel(u),
     "First name / mobile / email",
-    `<button data-edit-settings-user="${u.id}">Edit</button>`
+    isSuperAdmin() ? `<button data-edit-settings-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
   ]);
 }
 
@@ -586,6 +657,7 @@ function renderSettings() {
   ];
   document.getElementById("settingsGrid").innerHTML = `
     ${groups.map(([key, title]) => renderMasterEditor(key, title)).join("")}
+    ${renderLeadColumnDesigner()}
     <section class="panel">
       <h2>Add Admin / User</h2>
       <form id="settingsUserForm" class="form-grid">
@@ -596,15 +668,15 @@ function renderSettings() {
         <input name="password" placeholder="Password / PIN">
         <select name="role">${masters.roles.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
         <select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
+        <div id="settingsUserTabAccess" class="access-list"></div>
         <button class="primary">Save Admin</button>
       </form>
       <div id="settingsUserList" class="table-wrap"></div>
     </section>
     <section class="panel">
       <h2>Data Backup</h2>
-      <p class="bulk-help">Export all CRM data before major changes, and restore it on the same or another browser when needed.</p>
+      <p class="bulk-help">Restore a CRM backup only when Super Admin approves replacing the current browser data.</p>
       <div class="toolbar">
-        <button data-backup-data type="button">Export Backup</button>
         <button data-restore-data type="button">Restore Backup</button>
         <input id="restoreDataFile" class="hidden" type="file" accept="application/json,.json">
       </div>
@@ -614,19 +686,137 @@ function renderSettings() {
       <p class="bulk-help">Fixed database is connected. The CRM auto-loads on open, auto-saves after edits, and also saves quietly every 5 minutes.</p>
       <div class="form-grid">
         <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL" readonly>
-        <label><input id="autoSheetSync" type="checkbox"> Auto load and auto save</label>
+        <input value="Auto load and auto save is locked ON" readonly>
       </div>
       <div class="toolbar">
-        <button data-save-sheet-settings type="button">Save Sync Settings</button>
         <button data-load-from-sheet type="button">Load all work</button>
         <button data-save-to-sheet type="button">Save your work</button>
+        <button data-update-old-sheet type="button">Update from Google Sheet</button>
       </div>
       <p id="sheetSyncStatus" class="bulk-help"></p>
     </section>`;
 
   bindSettingsForms();
+  renderUserTabAccess("settingsUserTabAccess");
   renderSettingsUsers();
   renderSheetSyncSettings();
+}
+
+function renderLeadColumnDesigner() {
+  const disabled = !isSuperAdmin() ? "disabled" : "";
+  const options = leadColumnOptions();
+  const columns = activeLeadColumns();
+  return `<section class="panel lead-column-panel">
+    <h2>Lead Table Columns</h2>
+    <p class="bulk-help">Super Admin can decide which columns appear in Leads. Custom fields imported from old Google Sheet can be shown as separate columns.</p>
+    <div class="lead-column-list">
+      ${columns.map((column, index) => `<div class="lead-column-row" data-lead-column-row="${index}">
+        <select data-column-key ${disabled}>
+          ${options.map(option => `<option value="${escapeAttr(option.key)}" ${option.key === column.key ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+        </select>
+        <input data-column-label value="${escapeAttr(column.label)}" placeholder="Column heading" ${disabled}>
+        <button class="pill-remove" data-remove-lead-column="${index}" type="button" title="Remove" ${disabled}>x</button>
+      </div>`).join("")}
+    </div>
+    <div class="toolbar">
+      <button data-add-lead-column type="button" ${disabled}>Add Column</button>
+      <button data-save-lead-columns class="primary" type="button" ${disabled}>Save Columns</button>
+      <button data-reset-lead-columns type="button" ${disabled}>Reset Default</button>
+    </div>
+    <div class="form-grid">
+      <input id="newCustomLeadField" placeholder="Add new custom field column e.g. Enquiry Given By" ${disabled}>
+      <button data-add-custom-lead-field type="button" ${disabled}>Add Custom Field</button>
+    </div>
+  </section>`;
+}
+
+function leadColumnOptions() {
+  const standard = [
+    ["createdAt", "Date Added"],
+    ["leadAge", "Age of Lead"],
+    ["lastEdited", "Last Edited"],
+    ["name", "Name"],
+    ["firstName", "First Name"],
+    ["lastName", "Last Name"],
+    ["studentMobile", "Mobile No."],
+    ["parentMobile", "Parent Mobile"],
+    ["email", "Email"],
+    ["location", "Location"],
+    ["course", "Course"],
+    ["attempt", "Attempt"],
+    ["branch", "Branch"],
+    ["batch", "Batch"],
+    ["leadSource", "Lead Source"],
+    ["source", "Reference"],
+    ["referenceDetails", "Reference Details"],
+    ["status", "Status"],
+    ["assignedTo", "Admin"],
+    ["followupAt", "Next Follow-up"],
+    ["remarks", "Remarks"],
+    ["actions", "Actions"]
+  ].map(([key, label]) => ({ key, label }));
+  return [...standard, ...customLeadFieldNames().map(name => ({ key: name, label: `Custom: ${name}` }))];
+}
+
+function customLeadFieldNames() {
+  const fromLeads = state.leads.flatMap(lead => Object.keys(lead.customFields || {}));
+  return [...new Set([...(state.customLeadFields || []), ...fromLeads])].filter(Boolean).sort();
+}
+
+function leadColumnLabel(key) {
+  return leadColumnOptions().find(option => option.key === key)?.label?.replace(/^Custom: /, "") || key;
+}
+
+function addLeadColumn() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit lead columns.");
+  const options = leadColumnOptions();
+  const currentKeys = activeLeadColumns().map(column => column.key);
+  const next = options.find(option => !currentKeys.includes(option.key)) || options[0];
+  state.leadColumns = [...activeLeadColumns(), { key: next.key, label: next.label.replace(/^Custom: /, "") }];
+  save();
+  render();
+}
+
+function addCustomLeadField() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit lead columns.");
+  const input = document.getElementById("newCustomLeadField");
+  const fieldName = input?.value.trim();
+  if (!fieldName) return;
+  addUnique(state.customLeadFields, fieldName);
+  if (!activeLeadColumns().some(column => column.key === fieldName)) {
+    state.leadColumns = [...activeLeadColumns(), { key: fieldName, label: fieldName }];
+  }
+  save();
+  render();
+}
+
+function removeLeadColumn(index) {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit lead columns.");
+  if (!confirm("Remove this column from the Leads table view? Data will not be deleted.")) return;
+  state.leadColumns = activeLeadColumns().filter((_, i) => i !== index);
+  if (!state.leadColumns.length) state.leadColumns = structuredClone(defaultLeadColumns);
+  save();
+  render();
+}
+
+function saveLeadColumnsFromDesigner() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit lead columns.");
+  const rows = [...document.querySelectorAll("[data-lead-column-row]")];
+  state.leadColumns = rows.map(row => {
+    const key = row.querySelector("[data-column-key]")?.value;
+    const label = row.querySelector("[data-column-label]")?.value.trim() || leadColumnLabel(key);
+    return { key, label };
+  }).filter(column => column.key);
+  save();
+  render();
+}
+
+function resetLeadColumns() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit lead columns.");
+  if (!confirm("Reset Leads table columns to the default view?")) return;
+  state.leadColumns = structuredClone(defaultLeadColumns);
+  save();
+  render();
 }
 
 function renderMasterEditor(key, title) {
@@ -653,22 +843,46 @@ function withUnassigned(values) {
   return ["Unassigned", ...values.filter(v => v !== "Unassigned")];
 }
 
+function renderUserTabAccess(containerId, user = null) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const selected = Array.isArray(user?.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  const disabled = !isSuperAdmin() ? "disabled" : "";
+  container.innerHTML = `
+    <label class="access-title">Tabs visible to this user</label>
+    <div class="access-grid">
+      ${tabs.map(([key, label]) => `<label><input type="checkbox" name="tabAccess" value="${key}" ${selected.includes(key) ? "checked" : ""} ${disabled}> ${escapeHtml(label)}</label>`).join("")}
+    </div>`;
+}
+
+function collectTabAccess(form) {
+  const checked = [...form.querySelectorAll('input[name="tabAccess"]:checked')].map(input => input.value);
+  return checked.length ? checked : tabs.map(([key]) => key);
+}
+
+function userAccessLabel(user) {
+  if (isSuperAdminUser(user)) return "All tabs";
+  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  if (allowed.length === tabs.length) return "All tabs";
+  return allowed.map(key => tabs.find(tab => tab[0] === key)?.[1] || key).join(", ");
+}
+
 function getSheetSyncSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(`${storeKey}.sheetSync`) || "{}");
     return {
       url: normalizeSheetUrl(saved.url) || fixedSheetWebAppUrl,
-      auto: saved.auto !== false
+      auto: true
     };
   } catch {
     return { url: fixedSheetWebAppUrl, auto: true };
   }
 }
 
-function setSheetSyncSettings(settings) {
+function setSheetSyncSettings(settings = {}) {
   localStorage.setItem(`${storeKey}.sheetSync`, JSON.stringify({
     url: normalizeSheetUrl(settings.url) || fixedSheetWebAppUrl,
-    auto: settings.auto !== false
+    auto: true
   }));
 }
 
@@ -685,18 +899,14 @@ function normalizeSheetUrl(url) {
 function renderSheetSyncSettings() {
   const settings = getSheetSyncSettings();
   const url = document.getElementById("sheetWebAppUrl");
-  const auto = document.getElementById("autoSheetSync");
   if (url) url.value = settings.url || "";
-  if (auto) auto.checked = Boolean(settings.auto);
-  setSheetStatus(settings.auto ? "Auto sync is ON. Work saves automatically." : "Auto sync is OFF. Use Save your work manually.");
+  setSheetStatus("Auto sync is locked ON. Work saves automatically.");
 }
 
 function saveSheetSyncSettings() {
-  const url = normalizeSheetUrl(document.getElementById("sheetWebAppUrl")?.value) || fixedSheetWebAppUrl;
-  const auto = Boolean(document.getElementById("autoSheetSync")?.checked);
-  setSheetSyncSettings({ url, auto });
-  if (auto) startPeriodicSheetSync();
-  setSheetStatus(auto ? "Auto sync enabled. Your work will save automatically." : "Auto sync off. Use Save your work manually.");
+  setSheetSyncSettings({ url: fixedSheetWebAppUrl, auto: true });
+  startPeriodicSheetSync();
+  setSheetStatus("Auto sync is locked ON. Your work will save automatically.");
 }
 
 function setSheetStatus(message) {
@@ -752,6 +962,7 @@ function loadFromSheet({ silent = false } = {}) {
       if (payload?.data) {
         isCloudLoading = true;
         state = payload.data;
+        normalizeStateDefaults(state);
         masters = state.masters || masters;
         localStorage.setItem(storeKey, JSON.stringify(state));
         isCloudLoading = false;
@@ -777,6 +988,422 @@ function loadFromSheet({ silent = false } = {}) {
     script.remove();
   };
   document.body.appendChild(script);
+}
+
+function updateFromOldGoogleSheet() {
+  if (!isSuperAdmin() && !isLeadManager()) {
+    alert("Only Super Admin or Lead Manager can update leads from the old Google Sheet.");
+    return;
+  }
+  if (!confirm("Load old Google Sheet columns for mapping before import? No CRM data will change until you confirm the final import.")) return;
+  const settings = getSheetSyncSettings();
+  const callbackName = `crmLegacySheet_${Date.now()}`;
+  setSheetStatus("Reading old Google Sheet...");
+  window[callbackName] = payload => {
+    try {
+      if (!payload?.ok) throw new Error(payload?.error || "Could not read old Google Sheet.");
+      legacySheetPayload = { rows: payload.rows || [], headers: payload.headers || [] };
+      renderLegacySheetMapping();
+      document.getElementById("legacySheetDialog").showModal();
+      setSheetStatus(`Old Google Sheet loaded: ${legacySheetPayload.rows.length} rows. Map columns before importing.`);
+    } catch (error) {
+      setSheetStatus("Old Google Sheet update failed. Check Apps Script deployment and sheet access.");
+      alert(`Old Google Sheet update failed: ${error.message}`);
+    } finally {
+      delete window[callbackName];
+      document.getElementById(callbackName)?.remove();
+    }
+  };
+  const script = document.createElement("script");
+  script.id = callbackName;
+  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=legacy&callback=${callbackName}&t=${Date.now()}`;
+  script.onerror = () => {
+    setSheetStatus("Old Google Sheet update failed. Check Apps Script access.");
+    delete window[callbackName];
+    script.remove();
+  };
+  document.body.appendChild(script);
+}
+
+function renderLegacySheetMapping() {
+  const headers = legacySheetPayload?.headers || [];
+  const rows = legacySheetPayload?.rows || [];
+  const options = legacyMappingOptions();
+  const mappingHtml = `
+    <table class="legacy-map-table">
+      <thead><tr><th>Old Google Sheet Column</th><th>Use In CRM As</th><th>Custom Field Name</th><th>Sample Value</th></tr></thead>
+      <tbody>
+        ${headers.map(header => `<tr>
+          <td><strong>${escapeHtml(header)}</strong></td>
+          <td><select data-legacy-map="${escapeAttr(header)}">${options.map(([value, label]) => `<option value="${value}" ${value === guessLegacyField(header) ? "selected" : ""}>${label}</option>`).join("")}</select></td>
+          <td><input data-legacy-custom="${escapeAttr(header)}" placeholder="e.g. Webinar ID, Old Batch" value="${escapeAttr(header)}"></td>
+          <td>${escapeHtml(firstNonBlank(rows, header))}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+  document.getElementById("legacyMapping").innerHTML = mappingHtml;
+  renderLegacyPreview();
+  document.querySelectorAll("[data-legacy-map]").forEach(select => {
+    select.addEventListener("change", () => {
+      updateLegacyCustomInputs();
+      renderLegacyPreview();
+    });
+  });
+  document.querySelectorAll("[data-legacy-custom]").forEach(input => input.addEventListener("input", renderLegacyPreview));
+  updateLegacyCustomInputs();
+}
+
+function renderLegacyPreview() {
+  const headers = legacySheetPayload?.headers || [];
+  const rows = (legacySheetPayload?.rows || []).slice(0, 5);
+  const mapping = collectLegacyMapping();
+  const customNames = collectLegacyCustomNames();
+  const preview = rows.map(row => legacyRowToLead(row, headers, "Old Google Sheet - Form Responses 1", mapping, customNames));
+  table("legacyPreview", preview, ["Preview Name", "Mobile", "Course", "Attempt", "Branch", "Admin", "Custom Fields", "Remarks From"], lead => [
+    displayLeadName(lead),
+    lead.studentMobile,
+    lead.course,
+    lead.attempt,
+    lead.branch,
+    lead.assignedTo,
+    formatCustomFields(lead.customFields),
+    lead._remarkFields || ""
+  ]);
+}
+
+function legacyMappingOptions() {
+  return [
+    ["", "Ignore"],
+    ["studentName", "Student Name"],
+    ["firstName", "First Name"],
+    ["lastName", "Last Name"],
+    ["studentMobile", "Student Mobile"],
+    ["parentMobile", "Parent Mobile"],
+    ["email", "Email"],
+    ["location", "Location / Area"],
+    ["branch", "Branch"],
+    ["course", "Course"],
+    ["attempt", "Attempt"],
+    ["academicBackground", "Academic / Qualification"],
+    ["college", "College / School"],
+    ["assignedTo", "Admin Assigned"],
+    ["legacyCategory", "Admission / Follow-up Category"],
+    ["status", "Lead Status"],
+    ["leadSource", "Lead Source"],
+    ["remarks", "Remarks"],
+    ["createdAt", "Date Added"],
+    ["custom", "Custom Field"]
+  ];
+}
+
+function guessLegacyField(header) {
+  const label = normalizeHeader(header);
+  if (/enquiry.*given|given.*by|counsellor|admin|assigned/.test(label)) return "assignedTo";
+  if (/category|stage|calling.*status|response.*status|final.*status/.test(label)) return "legacyCategory";
+  if (/first.*name/.test(label)) return "firstName";
+  if (/last.*name|surname/.test(label)) return "lastName";
+  if (/student.*name|full.*name|candidate.*name|^name$/.test(label)) return "studentName";
+  if (/parent|father|mother|guardian/.test(label)) return "parentMobile";
+  if (/mobile|phone|contact|whatsapp/.test(label)) return "studentMobile";
+  if (/mail/.test(label)) return "email";
+  if (/course|cma|foundation|inter|final/.test(label)) return "course";
+  if (/attempt|exam|month|june|dec/.test(label)) return "attempt";
+  if (/branch|preferred.*location/.test(label)) return "branch";
+  if (/location|area|city|stay|address/.test(label)) return "location";
+  if (/qualification|education|class|graduation|academic/.test(label)) return "academicBackground";
+  if (/college|school|institution/.test(label)) return "college";
+  if (/source|reference/.test(label)) return "leadSource";
+  if (/remark|note|comment|query|doubt/.test(label)) return "remarks";
+  if (/timestamp|date|submitted|created/.test(label)) return "createdAt";
+  return "";
+}
+
+function firstNonBlank(rows, header) {
+  return (rows.find(row => row[header]) || {})[header] || "";
+}
+
+function collectLegacyMapping() {
+  const mapping = {};
+  document.querySelectorAll("[data-legacy-map]").forEach(select => {
+    if (select.value) mapping[select.dataset.legacyMap] = select.value;
+  });
+  return mapping;
+}
+
+function collectLegacyCustomNames() {
+  const customNames = {};
+  document.querySelectorAll("[data-legacy-custom]").forEach(input => {
+    const header = input.dataset.legacyCustom;
+    const mappedAs = document.querySelector(`[data-legacy-map="${cssEscape(header)}"]`)?.value;
+    if (mappedAs === "custom") customNames[header] = input.value.trim() || header;
+  });
+  return customNames;
+}
+
+function updateLegacyCustomInputs() {
+  document.querySelectorAll("[data-legacy-custom]").forEach(input => {
+    const header = input.dataset.legacyCustom;
+    const mappedAs = document.querySelector(`[data-legacy-map="${cssEscape(header)}"]`)?.value;
+    input.disabled = mappedAs !== "custom";
+  });
+}
+
+function confirmImportLegacySheet() {
+  if (!legacySheetPayload) return;
+  const mapping = collectLegacyMapping();
+  const customNames = collectLegacyCustomNames();
+  if (!Object.values(mapping).includes("studentMobile")) {
+    alert("Please tag one Google Sheet column as Student Mobile before importing.");
+    return;
+  }
+  const overwrite = Boolean(document.getElementById("legacyOverwrite")?.checked);
+  if (!confirm(`Import/update ${legacySheetPayload.rows.length} rows using this mapping?`)) return;
+  const result = importLegacySheetRows(legacySheetPayload.rows, legacySheetPayload.headers, mapping, { overwrite, customNames });
+  save();
+  render();
+  document.getElementById("legacySheetDialog").close();
+  setSheetStatus(`Old Google Sheet updated: ${result.created} new, ${result.updated} updated, ${result.admitted} admissions, ${result.skipped} skipped.`);
+  alert(`Updated from Google Sheet.\nNew leads: ${result.created}\nUpdated leads: ${result.updated}\nAdmissions created: ${result.admitted}\nSkipped rows: ${result.skipped}`);
+}
+
+function importLegacySheetRows(rows, headers, mapping = {}, options = {}) {
+  const stamp = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const sourceName = "Old Google Sheet - Form Responses 1";
+  addUnique(masters.sources, sourceName);
+  let created = 0;
+  let updated = 0;
+  let admitted = 0;
+  let skipped = 0;
+
+  rows.forEach(row => {
+    const lead = legacyRowToLead(row, headers, sourceName, mapping, options.customNames || {});
+    if (!lead.studentMobile) {
+      skipped += 1;
+      return;
+    }
+    Object.keys(lead.customFields || {}).forEach(field => addUnique(state.customLeadFields, field));
+    const existing = state.leads.find(item => item.studentMobile === lead.studentMobile);
+    const categoryRemark = lead.legacyCategory ? `Old Category: ${lead.legacyCategory}` : "";
+    const importRemark = `[${stamp}] Imported/updated from ${sourceName}, row ${row._rowNumber || ""}\n${[categoryRemark, legacyRowRemark(row, headers, mapping, options.customNames || {})].filter(Boolean).join("\n")}`;
+    let finalLead = lead;
+    if (existing) {
+      mergeLegacyLead(existing, lead, options);
+      existing.remarks = appendRemark(existing.remarks, importRemark);
+      existing.oldSheetRowNumber = row._rowNumber || existing.oldSheetRowNumber || "";
+      finalLead = existing;
+      updated += 1;
+    } else {
+      finalLead = {
+        ...lead,
+        id: id(),
+        remarks: importRemark,
+        createdAt: lead.createdAt || new Date().toISOString(),
+        lastTouchedAt: "",
+        lastTouchType: "",
+        oldSheetRowNumber: row._rowNumber || ""
+      };
+      state.leads.unshift(finalLead);
+      created += 1;
+    }
+    if (isAdmissionDoneCategory(lead.legacyCategory) && ensureLegacyAdmission(finalLead, lead)) admitted += 1;
+  });
+  return { created, updated, admitted, skipped };
+}
+
+function legacyRowToLead(row, headers, sourceName, mapping = {}, customNames = {}) {
+  const rowText = headers.map(header => row[header]).filter(Boolean).join("\n");
+  const phones = rowText.match(/\b[6-9]\d{9}\b/g) || [];
+  const mapped = mappedLegacyValues(row, headers, mapping);
+  const customFields = mappedLegacyCustomFields(row, headers, mapping, customNames);
+  const name = mapped.studentName || legacyField(row, headers, ["student name", "name", "full name", "candidate name"]) || inferName(rowText);
+  const mobile = onlyPhone(mapped.studentMobile) || onlyPhone(legacyField(row, headers, ["mobile", "phone", "contact", "whatsapp", "student mobile"])) || phones[0] || "";
+  const parentMobile = onlyPhone(mapped.parentMobile) || onlyPhone(legacyField(row, headers, ["parent", "father", "mother", "guardian"])) || phones.find(phone => phone !== mobile) || "";
+  const email = mapped.email || legacyField(row, headers, ["email", "mail"]) || (rowText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [""])[0];
+  const timestamp = mapped.createdAt || legacyField(row, headers, ["timestamp", "date", "created", "submitted"]);
+  const location = mapped.location || legacyField(row, headers, ["location", "area", "city", "where do you stay", "stay"]);
+  const courseText = mapped.course || legacyField(row, headers, ["course", "enquiry", "interested"]);
+  const attempt = mapped.attempt || legacyField(row, headers, ["attempt", "exam", "month"]);
+  const qualification = mapped.academicBackground || legacyField(row, headers, ["qualification", "education", "class", "graduation", "college", "academic"]);
+  const college = mapped.college || legacyField(row, headers, ["college", "school", "institution"]);
+  const branch = mapped.branch || legacyField(row, headers, ["branch", "location preferred", "preferred branch"]);
+  const assignedTo = matchAdminName(mapped.assignedTo) || currentUser?.name || state.users[0]?.name || "";
+  const legacyCategory = normalizeLegacyCategory(mapped.legacyCategory || legacyField(row, headers, ["category", "stage", "calling status", "response status", "final status"]));
+  const status = legacyStatusFromCategory(legacyCategory, mapped.status);
+  const mappedRemarkFields = headers.filter(header => mapping[header] === "remarks");
+  const firstName = mapped.firstName || firstNameOf(name || "Unknown Student");
+  const lastName = mapped.lastName || String(name || "").trim().split(/\s+/).slice(1).join(" ");
+  const lead = {
+    studentName: titleCase([firstName, lastName].filter(Boolean).join(" ") || name || "Unknown Student"),
+    firstName: titleCase(firstName),
+    lastName: titleCase(lastName),
+    studentMobile: mobile,
+    parentMobile,
+    email,
+    location: smartTitleCase(location),
+    branch: branch || detectBranch(rowText, location) || "Unassigned",
+    course: courseText ? detectCourse(courseText) : detectCourse(rowText),
+    attempt: attempt || "",
+    academicBackground: qualification || "",
+    currentQualification: qualification || "",
+    college,
+    source: sourceName,
+    leadSource: mapped.leadSource || sourceName,
+    assignedTo,
+    status,
+    legacyCategory,
+    followupAt: nextDayInputValue(),
+    createdAt: parseDateOrNow(timestamp),
+    oldSheetSource: sourceName,
+    customFields,
+    _remarkFields: mappedRemarkFields.map(header => `${header}: ${row[header]}`).filter(Boolean).join("<br>")
+  };
+  return lead;
+}
+
+function mappedLegacyValues(row, headers, mapping) {
+  const values = {};
+  headers.forEach(header => {
+    const target = mapping[header];
+    if (!target) return;
+    const value = String(row[header] || "").trim();
+    if (!value) return;
+    values[target] = values[target] ? `${values[target]} ${value}`.trim() : value;
+  });
+  return values;
+}
+
+function mappedLegacyCustomFields(row, headers, mapping, customNames = {}) {
+  const fields = {};
+  headers.forEach(header => {
+    if (mapping[header] !== "custom") return;
+    const value = String(row[header] || "").trim();
+    if (!value) return;
+    const name = customNames[header] || header;
+    fields[name] = value;
+  });
+  return fields;
+}
+
+function normalizeLegacyCategory(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function isAdmissionDoneCategory(category) {
+  return normalizeLegacyCategory(category).toLowerCase() === "admission done";
+}
+
+function legacyStatusFromCategory(category, mappedStatus) {
+  if (mappedStatus && masters.statuses.includes(mappedStatus)) return mappedStatus;
+  const normalized = normalizeLegacyCategory(category).toLowerCase();
+  const statusByCategory = {
+    "admission done": "Converted / Admitted",
+    "admission in process": "Fees Discussion Pending",
+    "will visit branch": "Interested",
+    "will attend demo": "Demo Attended",
+    "follow up again": "Follow-up Required",
+    "will let us know in 1-2 days": "Follow-up Required",
+    "will let us know in 1–2 days": "Follow-up Required",
+    "after result": "Follow-up Required",
+    "not connected": "Not Reachable",
+    "not connected called many times": "Not Reachable",
+    "joined other cma classes": "Lost Lead",
+    "joined other course in jksc": "Lost Lead",
+    "not interested to join jksc": "Not Interested",
+    "drop cma": "Lost Lead",
+    "fees issue at jksc": "Lost Lead",
+    "out of station": "Follow-up Required",
+    "wrong number": "Not Reachable",
+    "duplicate": "Lost Lead",
+    "others": "Follow-up Required"
+  };
+  const mapped = statusByCategory[normalized];
+  if (mapped && masters.statuses.includes(mapped)) return mapped;
+  return masters.statuses.includes("New Lead") ? "New Lead" : masters.statuses[0] || "";
+}
+
+function ensureLegacyAdmission(lead, importedLead) {
+  if (!lead?.id) return false;
+  if (state.admissions.some(admission => admission.leadId === lead.id)) return false;
+  lead.status = "Converted / Admitted";
+  lead.lastTouchedAt = lead.lastTouchedAt || new Date().toISOString();
+  lead.lastTouchType = lead.lastTouchType || "Admission";
+  state.admissions.unshift({
+    id: id(),
+    leadId: lead.id,
+    admissionDate: (lead.createdAt || importedLead.createdAt || todayDate()).slice(0, 10),
+    course: lead.course || importedLead.course || "",
+    batch: lead.batch || "Unassigned",
+    feesAgreed: "",
+    feesPaid: "",
+    paymentMode: "",
+    receiptNumber: "",
+    counsellor: lead.assignedTo || importedLead.assignedTo || "",
+    remarks: `Created from old Google Sheet category: ${importedLead.legacyCategory || "Admission Done"}`
+  });
+  return true;
+}
+
+function matchAdminName(value) {
+  const normalized = normalizeLogin(value);
+  if (!normalized) return "";
+  return state.users.find(user =>
+    normalizeLogin(user.name) === normalized ||
+    normalizeLogin(firstNameOf(user.name)) === normalized ||
+    normalizeLogin(user.name).startsWith(normalized)
+  )?.name || String(value || "").trim();
+}
+
+function parseDateOrNow(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function legacyField(row, headers, keywords) {
+  const normalized = headers.map(header => ({ header, label: normalizeHeader(header) }));
+  const found = normalized.find(item => keywords.some(keyword => item.label.includes(normalizeHeader(keyword))));
+  return found ? String(row[found.header] || "").trim() : "";
+}
+
+function normalizeHeader(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function onlyPhone(value) {
+  return (String(value || "").match(/\b[6-9]\d{9}\b/) || [""])[0];
+}
+
+function mergeLegacyLead(existing, imported, options = {}) {
+  ["studentName", "firstName", "lastName", "parentMobile", "email", "location", "branch", "course", "attempt", "academicBackground", "currentQualification", "college", "source", "leadSource"].forEach(key => {
+    if ((options.overwrite || !existing[key]) && imported[key]) existing[key] = imported[key];
+  });
+  if ((options.overwrite || !existing.assignedTo) && imported.assignedTo) existing.assignedTo = imported.assignedTo;
+  if ((options.overwrite || !existing.status) && imported.status) existing.status = imported.status;
+  if (imported.customFields && Object.keys(imported.customFields).length) {
+    existing.customFields = { ...(existing.customFields || {}), ...imported.customFields };
+  }
+  if (!existing.followupAt && imported.followupAt) existing.followupAt = imported.followupAt;
+}
+
+function legacyRowRemark(row, headers, mapping = {}, customNames = {}) {
+  return headers
+    .filter(header => header && row[header])
+    .map(header => `${header}: ${row[header]}`)
+    .join("\n");
+}
+
+function appendRemark(existing, remark) {
+  return [existing, remark].filter(Boolean).join("\n\n");
+}
+
+function formatCustomFields(fields = {}) {
+  const entries = Object.entries(fields || {});
+  if (!entries.length) return "";
+  return entries.map(([key, value]) => `<strong>${escapeHtml(key)}:</strong> ${escapeHtml(value)}`).join("<br>");
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(value);
+  return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function getThemeSetting() {
@@ -897,6 +1524,10 @@ function isWithinTargetPeriod(date, now, period) {
 
 function saveTargetPlan(e) {
   e.preventDefault();
+  if (!isSuperAdmin()) {
+    alert("Only Super Admin can create or edit target plans.");
+    return;
+  }
   const data = Object.fromEntries(new FormData(e.target).entries());
   const rows = data.branchTargets.split(/\n+/).map(line => {
     const parts = line.split(/,|\t/).map(part => part.trim()).filter(Boolean);
@@ -905,22 +1536,29 @@ function saveTargetPlan(e) {
     return { branch: parts[0], currentBase: 0, target: Number(parts[1]) || 0 };
   }).filter(row => row && row.branch && row.target);
 
-  state.targets.unshift({
-    id: id(),
+  const targetPlan = {
+    id: data.id || id(),
     title: data.title,
     course: data.course,
     attempt: data.attempt,
     rows,
-    createdAt: todayDate()
-  });
+    createdAt: data.id ? state.targets.find(plan => plan.id === data.id)?.createdAt || todayDate() : todayDate(),
+    updatedAt: new Date().toISOString()
+  };
+  if (data.id) {
+    state.targets = state.targets.map(plan => plan.id === data.id ? targetPlan : plan);
+  } else {
+    state.targets.unshift(targetPlan);
+  }
   save();
-  e.target.reset();
+  clearTargetForm();
   render();
 }
 
 function renderTargetPlans() {
   const container = document.getElementById("targetPlans");
   if (!container) return;
+  updateTargetFormAccess();
   if (!state.targets.length) {
     container.innerHTML = "<section class='panel'><p class='muted'>No target plans yet. Create a plan using branch targets.</p></section>";
     return;
@@ -949,7 +1587,9 @@ function renderTargetPlan(plan) {
         <h2>${escapeHtml(plan.title)}</h2>
         <p class="muted">${escapeHtml(plan.course)} | ${escapeHtml(plan.attempt)}</p>
       </div>
-      <button data-delete-target="${plan.id}" class="danger-btn" type="button">Delete Plan</button>
+      <div class="toolbar">
+        ${isSuperAdmin() ? `<button data-edit-target="${plan.id}" type="button">Edit Plan</button><button data-delete-target="${plan.id}" class="danger-btn" type="button">Delete Plan</button>` : "<span class='locked-action'>Only Super Admin can edit targets</span>"}
+      </div>
     </div>
     <div class="table-wrap">
       <table>
@@ -989,6 +1629,43 @@ function currentAdmissionsFor(branch, course, attempt) {
     normalizeCourseName(row.course || "") === normalizeCourseName(course || "") &&
     (row.attempt || "").toLowerCase() === (attempt || "").toLowerCase()
   ).length;
+}
+
+function updateTargetFormAccess() {
+  const form = document.getElementById("targetPlanForm");
+  const title = document.getElementById("targetPlanTitle");
+  if (!form) return;
+  form.querySelectorAll("input, select, textarea, button").forEach(input => input.disabled = !isSuperAdmin());
+  if (title) title.textContent = isSuperAdmin() ? (form.elements.id.value ? "Edit Target Plan" : "Create Target Plan") : "Target Plans";
+}
+
+function editTargetPlan(targetId) {
+  if (!isSuperAdmin()) {
+    alert("Only Super Admin can edit target plans.");
+    return;
+  }
+  const plan = state.targets.find(target => target.id === targetId);
+  const form = document.getElementById("targetPlanForm");
+  if (!plan || !form) return;
+  form.elements.id.value = plan.id;
+  form.elements.title.value = plan.title || "";
+  form.elements.course.value = plan.course || "";
+  form.elements.attempt.value = plan.attempt || "";
+  form.elements.branchTargets.value = targetRowsToText(plan.rows);
+  updateTargetFormAccess();
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function clearTargetForm() {
+  const form = document.getElementById("targetPlanForm");
+  if (!form) return;
+  form.reset();
+  form.elements.id.value = "";
+  updateTargetFormAccess();
+}
+
+function targetRowsToText(rows = []) {
+  return rows.map(row => `${row.branch}, ${Number(row.currentBase || 0)}, ${Number(row.target || 0)}`).join("\n");
 }
 
 function saveCampaign(e) {
@@ -1193,6 +1870,7 @@ function openLeadForm(lead) {
     form.elements.followupAt.value = nextDayInputValue();
     if (masters.statuses.includes("New Lead")) form.elements.status.value = "New Lead";
   }
+  renderLeadCustomFields(lead || {});
   updateEducationFields();
   updateReferenceFields();
   document.getElementById("leadDialog").showModal();
@@ -1211,6 +1889,7 @@ function saveLead(e) {
   data.createdAt = data.id ? data.createdAt || new Date().toISOString() : new Date().toISOString();
   data.lastTouchedAt = data.id ? new Date().toISOString() : "";
   data.lastTouchType = data.id ? "Edited" : "";
+  data.customFields = collectLeadCustomFields(e.target);
   data.academicBackground = buildAcademicSummary(data);
   data.currentQualification = data.educationLevel || "";
   data.pastPerformance = [data.tenthPercent && `10th: ${data.tenthPercent}`, data.twelfthPercent && `12th: ${data.twelfthPercent}`, data.graduationPercent && `Graduation: ${data.graduationPercent}`].filter(Boolean).join(", ");
@@ -1221,6 +1900,23 @@ function saveLead(e) {
   save();
   document.getElementById("leadDialog").close();
   render();
+}
+
+function renderLeadCustomFields(lead = {}) {
+  const fields = customLeadFieldNames();
+  const section = document.getElementById("leadCustomFieldsSection");
+  const container = document.getElementById("leadCustomFields");
+  if (!section || !container) return;
+  section.classList.toggle("hidden", !fields.length);
+  container.innerHTML = fields.map(field => `<label>${escapeHtml(field)}<input name="custom_${escapeAttr(field)}" data-custom-lead-field="${escapeAttr(field)}" value="${escapeAttr(lead.customFields?.[field] || "")}"></label>`).join("");
+}
+
+function collectLeadCustomFields(form) {
+  const fields = {};
+  form.querySelectorAll("[data-custom-lead-field]").forEach(input => {
+    if (input.value.trim()) fields[input.dataset.customLeadField] = input.value.trim();
+  });
+  return fields;
 }
 
 function prepareLeadForForm(lead) {
@@ -1318,10 +2014,16 @@ function saveTemplate(e) {
 }
 function saveUser(e) {
   e.preventDefault();
+  if (state.users.length && !isSuperAdmin()) {
+    alert("Only Super Admin can add or edit users and tab access.");
+    return;
+  }
   const data = Object.fromEntries(new FormData(e.target).entries());
+  const existingUser = data.id ? state.users.find(user => user.id === data.id) : null;
   data.id = data.id || "";
   if (!data.password) data.password = firstNameOf(data.name);
   if (!state.users.length && !data.id) data.role = "Super Admin";
+  data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || tabs.map(([key]) => key);
   if (data.id) {
     state.users = state.users.map(user => user.id === data.id ? { ...user, ...data } : user);
   } else {
@@ -1332,6 +2034,8 @@ function saveUser(e) {
   e.target.reset();
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
+  renderUserTabAccess("userTabAccess");
+  renderUserTabAccess("settingsUserTabAccess");
   render();
 }
 
@@ -1345,6 +2049,7 @@ function editUser(userId) {
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
+  renderUserTabAccess("userTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -1355,6 +2060,7 @@ function editSettingsUser(userId) {
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
+  renderUserTabAccess("settingsUserTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -1686,16 +2392,38 @@ function routeActions(e) {
   }
   if (button.dataset.backupData !== undefined) downloadDataBackup();
   if (button.dataset.restoreData !== undefined) document.getElementById("restoreDataFile")?.click();
+  if (button.dataset.addLeadColumn !== undefined) addLeadColumn();
+  if (button.dataset.addCustomLeadField !== undefined) addCustomLeadField();
+  if (button.dataset.saveLeadColumns !== undefined) saveLeadColumnsFromDesigner();
+  if (button.dataset.resetLeadColumns !== undefined) resetLeadColumns();
+  if (button.dataset.removeLeadColumn !== undefined) removeLeadColumn(Number(button.dataset.removeLeadColumn));
   if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
   if (button.dataset.saveToSheet !== undefined) saveToSheet();
-  if (button.dataset.clearCampaignForm !== undefined) clearCampaignForm();
+  if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
+  if (button.dataset.importLegacySheet !== undefined) confirmImportLegacySheet();
+  if (button.dataset.clearTargetForm !== undefined) {
+    if (!confirm("Clear the target plan form? Unsaved entries in this form will be removed.")) return;
+    clearTargetForm();
+  }
+  if (button.dataset.clearCampaignForm !== undefined) {
+    if (!confirm("Clear the campaign form? Unsaved campaign details in this form will be removed.")) return;
+    clearCampaignForm();
+  }
+  if (button.dataset.editTarget) editTargetPlan(button.dataset.editTarget);
   if (button.dataset.deleteTarget) {
+    if (!isSuperAdmin()) {
+      alert("Only Super Admin can delete target plans.");
+      return;
+    }
+    const target = state.targets.find(t => t.id === button.dataset.deleteTarget);
+    if (!target || !confirm(`Delete target plan "${target.title}"? This cannot be undone.`)) return;
     state.targets = state.targets.filter(t => t.id !== button.dataset.deleteTarget);
     save();
     render();
   }
   if (button.dataset.clearFilters) {
+    if (!confirm("Clear all selected filters?")) return;
     document.querySelectorAll(`[id^="${button.dataset.clearFilters}-"]`).forEach(el => el.value = "");
     render();
   }
@@ -1787,6 +2515,8 @@ function saveAdminAssignment(e) {
 }
 
 function downloadDataBackup() {
+  alert("Export is disabled.");
+  return;
   const backup = {
     exportedAt: new Date().toISOString(),
     app: "CMA Admission CRM",
@@ -1810,6 +2540,7 @@ function restoreDataBackup(file) {
       if (!data || !Array.isArray(data.leads) || !data.masters) throw new Error("Invalid backup file");
       if (!confirm("Restore this backup? Current browser CRM data will be replaced.")) return;
       state = data;
+      normalizeStateDefaults(state);
       masters = state.masters;
       save();
       currentUser = null;
@@ -2006,6 +2737,8 @@ function escapeHtml(value) {
 }
 function escapeAttr(value) { return escapeHtml(value); }
 function exportCsv(filename, rows) {
+  alert("Export is disabled.");
+  return;
   if (!rows.length) return alert("No data to export.");
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(","), ...rows.map(r => headers.map(h => `"${String(r[h] ?? "").replaceAll('"', '""')}"`).join(","))].join("\n");
