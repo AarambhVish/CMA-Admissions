@@ -158,9 +158,21 @@ function normalizeStateDefaults(data) {
     if (!lead.customFields) lead.customFields = {};
     Object.keys(lead.customFields).forEach(field => addUnique(data.customLeadFields, field));
   });
+  data.users.forEach(user => delete user.password);
 }
+
+function stripSensitiveData(data) {
+  (data.users || []).forEach(user => {
+    delete user.password;
+    delete user.pin;
+    delete user.secret;
+  });
+  return data;
+}
+
 function save() {
   state.masters = masters;
+  stripSensitiveData(state);
   localStorage.setItem(storeKey, JSON.stringify(state));
   queueCloudSave();
 }
@@ -196,14 +208,14 @@ function logoutUser() {
   const loginScreen = document.getElementById("loginScreen");
   if (loginScreen) loginScreen.classList.remove("hidden");
   const badge = document.getElementById("currentUserBadge");
-  if (badge) badge.textContent = hasLoginReady() ? "Logged out" : "Setup user passwords";
+  if (badge) badge.textContent = hasLoginReady() ? "Logged out" : "Setup users";
   document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
 }
 
 function updateAuthView() {
   document.getElementById("loginScreen").classList.toggle("hidden", Boolean(currentUser) || !hasLoginReady());
   const badge = document.getElementById("currentUserBadge");
-  if (badge) badge.textContent = currentUser ? `${currentUser.name} | ${currentUser.role}` : "Setup user passwords";
+  if (badge) badge.textContent = currentUser ? `${currentUser.name} | ${currentUser.role}` : "Setup users";
 }
 
 function isSuperAdmin() {
@@ -668,7 +680,6 @@ function renderSettings() {
         <input name="name" placeholder="Admin name" required>
         <input name="mobile" placeholder="Mobile">
         <input name="email" placeholder="Email">
-        <input name="password" placeholder="Password / PIN">
         <select name="role">${masters.roles.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
         <select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
         <div id="settingsUserTabAccess" class="access-list"></div>
@@ -943,7 +954,7 @@ function saveToSheet({ silent = false } = {}) {
   if (!silent) setSheetStatus("Saving to Google Sheet...");
   const body = new URLSearchParams();
   body.set("mode", "save");
-  body.set("payload", JSON.stringify(state));
+  body.set("payload", JSON.stringify(stripSensitiveData(structuredClone(state))));
   fetch(settings.url, { method: "POST", mode: "no-cors", body })
     .then(() => {
       localStorage.setItem(`${storeKey}.lastCloudSave`, new Date().toISOString());
@@ -2449,7 +2460,7 @@ function saveUser(e) {
   const data = Object.fromEntries(new FormData(e.target).entries());
   const existingUser = data.id ? state.users.find(user => user.id === data.id) : null;
   data.id = data.id || "";
-  if (!data.password) data.password = firstNameOf(data.name);
+  delete data.password;
   if (!state.users.length && !data.id) data.role = "Super Admin";
   data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || tabs.map(([key]) => key);
   if (data.id) {

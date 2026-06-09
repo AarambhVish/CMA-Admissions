@@ -41,10 +41,11 @@ function readDatabase_() {
   const sheet = getSheet_();
   const raw = sheet.getRange("A2").getValue();
   if (!raw) return null;
-  return JSON.parse(raw);
+  return sanitizeDatabase_(JSON.parse(raw));
 }
 
 function writeDatabase_(data) {
+  data = sanitizeDatabase_(data);
   const sheet = getSheet_();
   sheet.getRange("A1").setValue("CMA CRM Database JSON");
   sheet.getRange("B1").setValue("Last Saved");
@@ -140,4 +141,18 @@ function findAdmissionSheets_(spreadsheet) {
 
 function normalizeSheetName_(name) {
   return String(name || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function sanitizeDatabase_(data) {
+  if (!data || typeof data !== "object") return data;
+  if (Array.isArray(data.users)) {
+    data.users = data.users.map(user => {
+      const clean = Object.assign({}, user);
+      delete clean.password;
+      delete clean.pin;
+      delete clean.secret;
+      return clean;
+    });
+  }
+  return data;
 }
