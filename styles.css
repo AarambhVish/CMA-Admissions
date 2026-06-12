@@ -331,17 +331,35 @@ td.actions { white-space: nowrap; }
 .attendance-wrap {
   margin-bottom: 18px;
 }
+.attendance-register-panel {
+  padding: 14px;
+}
+.attendance-entry-panel {
+  margin-bottom: 18px;
+}
+.attendance-entry-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.attendance-entry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 14px;
+}
 .attendance-table {
-  min-width: 1180px;
+  min-width: 980px;
   table-layout: fixed;
 }
 .attendance-table th,
 .attendance-table td {
-  min-width: 150px;
-  padding: 8px;
+  min-width: 120px;
+  padding: 7px;
+  font-size: 13px;
 }
 .attendance-table .student-col {
-  min-width: 170px;
+  min-width: 150px;
+  width: 150px;
   position: sticky;
   left: 0;
   z-index: 3;
@@ -351,14 +369,44 @@ td.actions { white-space: nowrap; }
   background: #f8fafc;
   z-index: 4;
 }
+.attendance-table .initial-col {
+  min-width: 52px;
+  width: 52px;
+  text-align: center;
+  position: sticky;
+  left: 150px;
+  z-index: 3;
+  background: var(--panel);
+  font-weight: 700;
+}
+.attendance-table th.initial-col {
+  background: #f8fafc;
+  z-index: 4;
+}
+.attendance-table .lecture-col {
+  min-width: 155px;
+  width: 155px;
+  text-align: center;
+}
 .attendance-cell {
-  min-width: 170px;
+  min-width: 155px;
+  width: 155px;
+  text-align: center;
 }
 .attendance-cell select {
   width: 100%;
   margin-bottom: 6px;
   padding: 7px;
   font-size: 13px;
+}
+.attendance-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 28px;
+}
+.empty-lecture {
+  color: var(--muted);
+  text-align: center;
 }
 .attendance-cell.present {
   background: #ecfdf5;

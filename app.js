@@ -170,7 +170,20 @@ function normalizeStateDefaults(data) {
     if (!lead.customFields) lead.customFields = {};
     Object.keys(lead.customFields).forEach(field => addUnique(data.customLeadFields, field));
   });
-  data.users.forEach(user => delete user.password);
+  data.users.forEach(user => {
+    delete user.password;
+    user.tabAccess = normalizeUserTabAccess(user.tabAccess);
+  });
+}
+
+function normalizeUserTabAccess(tabAccess) {
+  const allTabs = tabs.map(([key]) => key);
+  if (!Array.isArray(tabAccess) || !tabAccess.length) return allTabs;
+  const valid = tabAccess.filter(key => allTabs.includes(key));
+  allTabs.forEach(key => {
+    if (!valid.includes(key)) valid.push(key);
+  });
+  return valid;
 }
 
 function stripSensitiveData(data) {
@@ -745,7 +758,7 @@ function attendanceSessionTitle(session) {
   const date = new Date(`${session.date}T00:00:00`);
   const day = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { weekday: "short" });
   const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-  return `${escapeHtml(shortDate)}<br>${escapeHtml(day)}<br>${escapeHtml(session.subject)}<br><span class="muted">${escapeHtml(session.prof)}</span>`;
+  return `<strong>${escapeHtml(shortDate)}</strong><br>${escapeHtml(day)}<br><span>${escapeHtml(session.subject)}</span><br><span class="muted">${escapeHtml(session.prof)}</span>`;
 }
 
 function attendanceRecordKey(studentId, sessionId) {
@@ -759,24 +772,21 @@ function attendanceRecord(studentId, sessionId) {
 function renderAttendanceGrid(students, sessions) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
-  if (!students.length) {
-    target.innerHTML = "<p class='muted'>No demo/admitted students in this batch yet. Add a student or mark leads as Demo Attended / Converted.</p>";
-    return;
-  }
-  if (!sessions.length) {
-    target.innerHTML = "<p class='muted'>No lecture columns yet. Add Date + Subject + Prof above.</p>";
-    return;
-  }
+  const lectureHeaders = sessions.length
+    ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
+    : `<th class="lecture-col empty-lecture">Add lecture date</th>`;
+  const emptyColspan = 6 + Math.max(1, sessions.length);
   target.innerHTML = `<table class="attendance-table">
-    <thead><tr><th class="student-col">Student</th><th>Batch</th><th>Branch</th><th>Type</th>${sessions.map(session => `<th>${attendanceSessionTitle(session)}</th>`).join("")}<th>Actions</th></tr></thead>
-    <tbody>${students.map(student => `<tr>
-      <td class="student-col"><strong>${attendanceStudentName(student)}</strong><br><span class="muted">${escapeHtml(student.source)}</span></td>
+    <thead><tr><th class="student-col">First Name</th><th class="initial-col">L</th><th>Batch</th><th>Branch</th><th>Type</th>${lectureHeaders}<th>Actions</th></tr></thead>
+    <tbody>${students.length ? students.map(student => `<tr>
+      <td class="student-col"><strong>${escapeHtml(student.firstName || "")}</strong><br><span class="muted">${escapeHtml(student.source)}</span></td>
+      <td class="initial-col">${escapeHtml(student.lastInitial || "")}.</td>
       <td>${escapeHtml(student.batch || "")}</td>
       <td>${escapeHtml(student.branch || "")}</td>
       <td>${escapeHtml(student.studentType || "")}</td>
-      ${sessions.map(session => attendanceCell(student, session)).join("")}
+      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">Add lecture column above/below</td>`}
       <td>${student.source === "Manual" ? `<button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : "<span class='locked-action'>From leads</span>"}</td>
-    </tr>`).join("")}</tbody>
+    </tr>`).join("") : `<tr><td colspan="${emptyColspan}" class="attendance-empty">No students yet. Add a student below or mark a lead as Demo Attended / Converted.</td></tr>`}</tbody>
   </table>`;
 }
 
