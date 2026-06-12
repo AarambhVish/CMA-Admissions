@@ -713,7 +713,6 @@ function renderAttendance() {
   const students = attendanceRoster().filter(student => !batch || student.batch === batch).filter(student => !branch || student.branch === branch);
   const sessions = attendanceWeekSessions(batch, branch);
   renderAttendanceGrid(students, sessions);
-  renderAttendanceReport(students, sessions);
 }
 
 function renderAttendanceFilters() {
@@ -932,20 +931,17 @@ function renderAttendanceGrid(students, sessions) {
       <tr>
         <th class="attendance-batch-head" colspan="2">${escapeHtml(batch)}<br>${escapeHtml(branch)}</th>
         ${subjectHeaders}
-        <th class="details-col">&lt;Add more details&gt;</th>
       </tr>
       <tr>
         <th class="student-col">First Name</th>
         <th class="initial-col">Last Name &lt;</th>
         ${dateHeaders}
-        <th class="details-col">&lt;Add more details&gt;</th>
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
       <td class="student-col">${attendanceNameCell(student, "firstName")}</td>
       <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">-</td>`}
-      <td class="details-col">${escapeHtml(student.studentType || "")}<br><span class="muted">${escapeHtml(student.source || "")}</span>${student.source === "Manual" ? `<br><button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : ""}</td>
     </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>`;
 }
@@ -955,7 +951,6 @@ function renderManualAttendanceRow(index, sessions) {
     <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${index}:firstName" placeholder="<Add Manually>"></td>
     <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${index}:lastName" placeholder="<Add Manually>"></td>
     ${sessions.map(() => `<td class="attendance-cell empty-lecture"></td>`).join("")}
-    <td class="details-col muted">New row</td>
   </tr>`;
 }
 
@@ -975,10 +970,10 @@ function attendanceCell(student, session) {
       <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
       <option value="none" ${selected === "none" ? "selected" : ""}>-</option>
     </select>
-    <select data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}" ${record.present === false ? "" : "disabled"}>
-      <option value="">Remark</option>
-      ${masters.attendanceRemarks.map(remark => `<option ${remark === record.remark ? "selected" : ""}>${escapeHtml(remark)}</option>`).join("")}
-    </select>
+    ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
+        <option value="">Reason</option>
+        ${masters.attendanceRemarks.map(remark => `<option ${remark === record.remark ? "selected" : ""}>${escapeHtml(remark)}</option>`).join("")}
+      </select>` : ""}
   </td>`;
 }
 
@@ -3007,13 +3002,7 @@ function updateAttendanceRemark(value, remark) {
   record.remark = remark;
   state.attendanceRecords[key] = record;
   save();
-  renderAttendanceReport(
-    attendanceRoster().filter(student => !selectedAttendanceBatch() || student.batch === selectedAttendanceBatch()).filter(student => {
-      const branch = document.getElementById("attendance-branch")?.value || "";
-      return !branch || student.branch === branch;
-    }),
-    attendanceSessionsForBatch(selectedAttendanceBatch(), document.getElementById("attendance-branch")?.value || "")
-  );
+  renderAttendance();
 }
 
 function canManageAttendanceCell(studentId, sessionId) {

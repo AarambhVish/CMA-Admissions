@@ -329,13 +329,16 @@ td.actions { white-space: nowrap; }
   min-width: 190px;
 }
 .attendance-wrap {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
+  height: 75vh;
+  min-height: 480px;
+  overflow: auto;
 }
 .attendance-register-panel {
-  padding: 14px;
+  padding: 10px;
 }
 .attendance-entry-panel {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 .attendance-entry-panel summary {
   cursor: pointer;
@@ -348,21 +351,21 @@ td.actions { white-space: nowrap; }
   margin-top: 14px;
 }
 .attendance-table {
-  min-width: 980px;
+  min-width: 1040px;
   table-layout: fixed;
   border-color: #111827;
 }
 .attendance-table th,
 .attendance-table td {
-  min-width: 122px;
-  padding: 4px;
-  font-size: 13px;
+  min-width: 112px;
+  padding: 3px;
+  font-size: 12px;
   border-color: #111827;
   color: #020617;
 }
 .attendance-table .student-col {
-  min-width: 170px;
-  width: 170px;
+  min-width: 140px;
+  width: 140px;
   position: sticky;
   left: 0;
   z-index: 3;
@@ -373,11 +376,11 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .initial-col {
-  min-width: 112px;
-  width: 112px;
+  min-width: 140px;
+  width: 140px;
   text-align: center;
   position: sticky;
-  left: 170px;
+  left: 140px;
   z-index: 3;
   background: var(--panel);
   font-weight: 700;
@@ -387,19 +390,19 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .lecture-col {
-  min-width: 170px;
-  width: 170px;
+  min-width: 128px;
+  width: 128px;
   text-align: center;
-  font-size: 16px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.2;
   background: #fff;
 }
 .attendance-batch-head {
-  min-width: 282px;
-  width: 282px;
+  min-width: 280px;
+  width: 280px;
   text-align: center;
-  font-size: 17px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.35;
   background: #fff;
 }
 .attendance-table .details-col {
@@ -410,34 +413,37 @@ td.actions { white-space: nowrap; }
   font-size: 14px;
 }
 .attendance-cell {
-  min-width: 170px;
-  width: 170px;
+  min-width: 128px;
+  width: 128px;
   text-align: center;
   vertical-align: middle;
 }
 .attendance-cell select {
   width: 100%;
-  margin-bottom: 6px;
-  padding: 7px;
-  font-size: 13px;
+  margin-bottom: 0;
+  padding: 3px;
+  font-size: 12px;
 }
 .attendance-cell .attendance-mark {
-  width: 56px;
-  min-width: 56px;
+  width: 48px;
+  min-width: 48px;
   border: 0;
   background: transparent;
   text-align: center;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 700;
   padding: 3px;
   appearance: auto;
+}
+.attendance-reason {
+  margin-top: 4px;
 }
 .attendance-name-input {
   width: 100%;
   border: 0;
   background: transparent;
   padding: 2px;
-  font-size: 14px;
+  font-size: 12px;
 }
 .attendance-header-select {
   width: 100%;
@@ -447,8 +453,10 @@ td.actions { white-space: nowrap; }
   background: #fff;
   text-align: center;
   font-weight: 700;
-  padding: 2px;
+  padding: 1px;
   margin: 0;
+  font-size: 12px;
+  line-height: 1.1;
 }
 .attendance-header-select + .attendance-header-select {
   margin-top: 2px;
