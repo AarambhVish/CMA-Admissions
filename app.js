@@ -1,5 +1,6 @@
 const storeKey = "cmaAdmissionCrm.v1";
 const fixedSheetWebAppUrl = "https://script.google.com/macros/s/AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A/exec";
+const cloudReminderMinutes = 10;
 const tabs = [
   ["dashboard", "Dashboard"],
   ["leads", "Leads"],
@@ -110,6 +111,7 @@ let parsedBulk = [];
 let currentUser = null;
 let syncTimer = null;
 let periodicSyncTimer = null;
+let cloudStatusTimer = null;
 let isCloudLoading = false;
 let legacySheetPayload = null;
 let admissionSheetPayload = null;
@@ -800,7 +802,7 @@ function renderSettings() {
     </section>
     <section class="panel">
       <h2>Google Sheet Database</h2>
-      <p class="bulk-help">Fixed database is connected. The CRM auto-loads on open, auto-saves after edits, and also saves quietly every 5 minutes.</p>
+      <p class="bulk-help">Fixed database is connected. The CRM auto-loads on open, auto-saves after edits, and reminds/saves to cloud every ${cloudReminderMinutes} minutes.</p>
       <div class="form-grid">
         <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL" readonly>
         <input value="Auto load and auto save is locked ON" readonly>
@@ -1019,18 +1021,55 @@ function renderSheetSyncSettings() {
   const settings = getSheetSyncSettings();
   const url = document.getElementById("sheetWebAppUrl");
   if (url) url.value = settings.url || "";
-  setSheetStatus("Auto sync is locked ON. Work saves automatically.");
+  setSheetStatus(`Auto sync is ON. App loads from cloud on start and reminds/saves every ${cloudReminderMinutes} minutes.`, "ok");
 }
 
 function saveSheetSyncSettings() {
   setSheetSyncSettings({ url: fixedSheetWebAppUrl, auto: true });
   startPeriodicSheetSync();
-  setSheetStatus("Auto sync is locked ON. Your work will save automatically.");
+  setSheetStatus(`Auto sync is ON. Your work saves automatically and every ${cloudReminderMinutes} minutes.`, "ok");
 }
 
-function setSheetStatus(message) {
+function setSheetStatus(message, type = "info") {
   const status = document.getElementById("sheetSyncStatus");
   if (status) status.textContent = message || "";
+  setCloudBadge(message, type);
+}
+
+function setCloudBadge(message, type = "info") {
+  const badge = document.getElementById("cloudStatusBadge");
+  if (!badge) return;
+  badge.textContent = compactCloudMessage(message);
+  badge.dataset.status = type;
+  clearTimeout(cloudStatusTimer);
+  if (type !== "busy") {
+    cloudStatusTimer = setTimeout(updateCloudBadgeFromLastSave, 8000);
+  }
+}
+
+function compactCloudMessage(message = "") {
+  if (/load/i.test(message) && !/loaded/i.test(message)) return "Cloud: loading";
+  if (/loaded/i.test(message)) return "Cloud: loaded";
+  if (/saving/i.test(message)) return "Cloud: saving";
+  if (/saved/i.test(message)) return "Cloud: saved";
+  if (/failed|could not|check/i.test(message)) return "Cloud: check";
+  return "Cloud: auto on";
+}
+
+function updateCloudBadgeFromLastSave() {
+  const badge = document.getElementById("cloudStatusBadge");
+  if (!badge) return;
+  const savedAt = localStorage.getItem(`${storeKey}.lastCloudSave`);
+  const loadedAt = localStorage.getItem(`${storeKey}.lastCloudLoad`);
+  const lastAt = savedAt || loadedAt;
+  if (!lastAt) {
+    badge.textContent = "Cloud: auto on";
+    badge.dataset.status = "info";
+    return;
+  }
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(lastAt).getTime()) / 60000));
+  badge.textContent = minutes < 1 ? "Cloud: just now" : `Cloud: ${minutes} min ago`;
+  badge.dataset.status = "ok";
 }
 
 function queueCloudSave() {
@@ -1042,40 +1081,46 @@ function queueCloudSave() {
 
 function startPeriodicSheetSync() {
   clearInterval(periodicSyncTimer);
+  updateCloudBadgeFromLastSave();
   periodicSyncTimer = setInterval(() => {
     const settings = getSheetSyncSettings();
-    if (settings.auto && settings.url && !isCloudLoading) saveToSheet({ silent: true });
-  }, 5 * 60 * 1000);
+    if (settings.auto && settings.url && !isCloudLoading) {
+      setSheetStatus("10-minute cloud reminder: saving latest CRM data...", "busy");
+      saveToSheet({ silent: false, reminder: true });
+    }
+  }, cloudReminderMinutes * 60 * 1000);
 }
 
-function saveToSheet({ silent = false } = {}) {
+function saveToSheet({ silent = false, reminder = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
-    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.");
+    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.", "error");
     return;
   }
-  if (!silent) setSheetStatus("Saving to Google Sheet...");
+  if (!silent) setSheetStatus(reminder ? "10-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
   const body = new URLSearchParams();
   body.set("mode", "save");
   body.set("payload", JSON.stringify(stripSensitiveData(structuredClone(state))));
   fetch(settings.url, { method: "POST", mode: "no-cors", body })
     .then(() => {
       localStorage.setItem(`${storeKey}.lastCloudSave`, new Date().toISOString());
-      if (!silent) setSheetStatus("Saved to Google Sheet.");
+      if (!silent) setSheetStatus(reminder ? "Cloud saved. Next reminder/save will run in 10 minutes." : "Saved to Google Sheet.", "ok");
+      if (silent) updateCloudBadgeFromLastSave();
     })
     .catch(() => {
-      if (!silent) setSheetStatus("Save failed. Check Web App URL and sharing permissions.");
+      if (!silent) setSheetStatus("Save failed. Check Web App URL and sharing permissions.", "error");
+      if (silent) setCloudBadge("Save failed. Check Web App URL and sharing permissions.", "error");
     });
 }
 
 function loadFromSheet({ silent = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
-    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.");
+    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.", "error");
     return;
   }
   const callbackName = `crmSheetLoad_${Date.now()}`;
-  if (!silent) setSheetStatus("Loading from Google Sheet...");
+  setSheetStatus(silent ? "Auto-loading latest CRM data from cloud..." : "Loading from Google Sheet...", "busy");
   window[callbackName] = payload => {
     try {
       if (payload?.data) {
@@ -1087,13 +1132,17 @@ function loadFromSheet({ silent = false } = {}) {
         isCloudLoading = false;
         loadCurrentUser();
         render();
-        setSheetStatus("Loaded from Google Sheet.");
+        localStorage.setItem(`${storeKey}.lastCloudLoad`, new Date().toISOString());
+        setSheetStatus(silent ? "Latest cloud data loaded on app start." : "Loaded from Google Sheet.", "ok");
       } else if (!silent) {
-        setSheetStatus("Google Sheet is empty. Save current data to initialize it.");
+        setSheetStatus("Google Sheet is empty. Save current data to initialize it.", "info");
+      } else {
+        setSheetStatus("Cloud database is empty. Use Save your work to initialize it.", "info");
       }
     } catch {
-      setSheetStatus("Could not load Google Sheet data.");
+      setSheetStatus("Could not load Google Sheet data.", "error");
     } finally {
+      isCloudLoading = false;
       delete window[callbackName];
       document.getElementById(callbackName)?.remove();
     }
@@ -1102,7 +1151,7 @@ function loadFromSheet({ silent = false } = {}) {
   script.id = callbackName;
   script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=load&callback=${callbackName}&t=${Date.now()}`;
   script.onerror = () => {
-    if (!silent) setSheetStatus("Load failed. Check Web App URL deployment access.");
+    setSheetStatus("Load failed. Check Web App URL deployment access.", "error");
     delete window[callbackName];
     script.remove();
   };
