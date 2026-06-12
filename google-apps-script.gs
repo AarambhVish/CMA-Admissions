@@ -1,4 +1,5 @@
 const SHEET_NAME = "Database";
+const DATABASE_SPREADSHEET_ID = "1GkSbJxbndwWO1sRQL3_yGV-I6fIFAOaPnWcBBfevf5Q";
 const OLD_LEADS_SPREADSHEET_ID = "1yB27fwVWdLY0jzpf6CTwtFQchrVUQHIAMgcw0OILu6s";
 const OLD_LEADS_SHEET_NAME = "Form Responses 1";
 const ADMISSION_SPREADSHEET_ID = "1TfBPncD41S0xCxX7uPOQVJJxltPFET5V8Ez3meJ6hlI";
@@ -54,7 +55,7 @@ function writeDatabase_(data) {
 }
 
 function getSheet_() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const spreadsheet = SpreadsheetApp.openById(DATABASE_SPREADSHEET_ID);
   let sheet = spreadsheet.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = spreadsheet.insertSheet(SHEET_NAME);
   return sheet;
