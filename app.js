@@ -37,6 +37,8 @@ const defaultMasters = {
   statuses: ["New Lead", "Contacted", "Interested", "Prospectus Sent", "Demo Attended", "Follow-up Required", "Parent Discussion Pending", "Fees Discussion Pending", "Converted / Admitted", "Not Interested", "Not Reachable", "Lost Lead"],
   roles: ["Super Admin", "Lead Manager", "Counsellor / Admin"],
   batches: ["Morning Batch", "Evening Batch", "Weekend Batch"],
+  attendanceBatches: ["CMAF_D26_Borivali", "CMAI_D26_Borivali"],
+  professors: ["Pradeep Sir", "Radhika Miss"],
   attendanceRemarks: ["Fever / Health Issue", "College / Exam", "Family Reason", "Out of Station", "Not Responding", "Will Attend Next Lecture", "Other"]
 };
 
@@ -107,7 +109,7 @@ const seed = {
   targets: [],
   leadColumns: structuredClone(defaultLeadColumns),
   customLeadFields: [],
-  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
+  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
 };
 
 let state = load();
@@ -162,6 +164,8 @@ function normalizeStateDefaults(data) {
     statuses: data.masters?.statuses || [],
     roles: data.masters?.roles || [],
     batches: data.masters?.batches || [],
+    attendanceBatches: data.masters?.attendanceBatches || structuredClone(defaultMasters.attendanceBatches),
+    professors: data.masters?.professors || structuredClone(defaultMasters.professors),
     attendanceRemarks: data.masters?.attendanceRemarks || structuredClone(defaultMasters.attendanceRemarks)
   };
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
@@ -305,6 +309,21 @@ function canPermanentlyDelete() {
   return isSuperAdmin() || isLeadManager();
 }
 
+function canManageAllAttendance() {
+  return isSuperAdmin() || isLeadManager();
+}
+
+function attendanceAdminBranch() {
+  return currentUser?.branch && currentUser.branch !== "Unassigned" ? currentUser.branch : "";
+}
+
+function canManageAttendanceBranch(branch) {
+  if (!currentUser) return false;
+  if (canManageAllAttendance()) return true;
+  const ownBranch = attendanceAdminBranch();
+  return Boolean(ownBranch && branch === ownBranch);
+}
+
 function hasLoginReady() {
   return state.users.length > 0;
 }
@@ -386,6 +405,7 @@ function bindEvents() {
   document.getElementById("referenceType").addEventListener("change", updateReferenceFields);
   document.getElementById("followupForm").addEventListener("submit", saveFollowup);
   document.getElementById("admissionForm").addEventListener("submit", saveAdmission);
+  document.getElementById("attendanceBatchForm").addEventListener("submit", saveAttendanceBatch);
   document.getElementById("attendanceStudentForm").addEventListener("submit", saveAttendanceStudent);
   document.getElementById("attendanceSessionForm").addEventListener("submit", saveAttendanceSession);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
@@ -400,6 +420,7 @@ function bindEvents() {
   document.getElementById("exportCampaigns")?.addEventListener("click", () => alert("Export is disabled."));
   document.body.addEventListener("click", routeActions);
   document.body.addEventListener("change", routeSelectActions);
+  document.body.addEventListener("change", routeAttendanceTextEdits);
   document.addEventListener("copy", blockProtectedCopy);
   document.addEventListener("cut", blockProtectedCopy);
   document.addEventListener("contextmenu", blockProtectedContextMenu);
@@ -685,11 +706,12 @@ function renderAdmissions() {
 }
 
 function renderAttendance() {
+  prepareAttendanceForms();
   renderAttendanceFilters();
   const batch = selectedAttendanceBatch();
   const branch = document.getElementById("attendance-branch")?.value || "";
   const students = attendanceRoster().filter(student => !batch || student.batch === batch).filter(student => !branch || student.branch === branch);
-  const sessions = attendanceSessionsForBatch(batch);
+  const sessions = attendanceSessionsForBatch(batch, branch);
   renderAttendanceGrid(students, sessions);
   renderAttendanceReport(students, sessions);
 }
@@ -698,11 +720,15 @@ function renderAttendanceFilters() {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
-  const currentBranch = document.getElementById("attendance-branch")?.value || "";
+  const branchOptions = attendanceBranchChoices();
+  const adminBranch = attendanceAdminBranch();
+  const currentBranch = canManageAllAttendance()
+    ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || ""
+    : adminBranch;
   const batchChoices = attendanceBatchChoices();
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<select id="attendance-branch"><option value="">All branches</option>${withUnassigned(masters.branches).map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
+    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<button data-clear-attendance-filters type="button">Clear</button>`
   ].join("");
   if (!el.dataset.ready) {
@@ -711,22 +737,67 @@ function renderAttendanceFilters() {
   }
 }
 
+function attendanceBatchLocation(batchName = "") {
+  const parts = String(batchName || "").split("_").filter(Boolean);
+  return parts.length >= 3 ? parts.slice(2).join(" ") : "";
+}
+
+function attendanceBranchChoices() {
+  if (!canManageAllAttendance()) return [attendanceAdminBranch() || "Unassigned"];
+  return withUnassigned(masters.branches);
+}
+
+function prepareAttendanceForms() {
+  const batchForm = document.getElementById("attendanceBatchForm");
+  const studentForm = document.getElementById("attendanceStudentForm");
+  const sessionForm = document.getElementById("attendanceSessionForm");
+  const adminBranch = attendanceAdminBranch();
+  if (batchForm) {
+    batchForm.querySelectorAll("input, select, button").forEach(input => input.disabled = !isSuperAdmin());
+    if (batchForm.elements.location) batchForm.elements.location.innerHTML = masters.branches.map(branch => `<option>${escapeHtml(branch)}</option>`).join("");
+  }
+  const batchOptions = attendanceBatchChoices().map(batch => `<option>${escapeHtml(batch)}</option>`).join("");
+  if (studentForm?.elements.batch) {
+    studentForm.elements.batch.innerHTML = batchOptions;
+  }
+  if (sessionForm) {
+    if (sessionForm.elements.batch) sessionForm.elements.batch.innerHTML = batchOptions;
+    if (sessionForm.elements.subject) sessionForm.elements.subject.innerHTML = attendancePaperOptions(selectedAttendanceBatch() || sessionForm.elements.batch?.value || "").map(paper => `<option>${escapeHtml(paper)}</option>`).join("");
+    if (sessionForm.elements.prof) sessionForm.elements.prof.innerHTML = masters.professors.map(prof => `<option>${escapeHtml(prof)}</option>`).join("");
+    const helper = sessionForm.querySelector("[data-attendance-branch-note]");
+    if (helper) helper.textContent = canManageAllAttendance() ? "Lecture column applies to the selected attendance batch." : `Lecture column will be managed for ${adminBranch || "your branch"}.`;
+  }
+}
+
 function attendanceBatchChoices() {
-  return [...new Set([...masters.batches, ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch), ...activeLeads().map(l => l.batch)].filter(Boolean))];
+  const choices = [...new Set([...(masters.attendanceBatches || []), ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch)].filter(Boolean))];
+  if (!canManageAllAttendance()) {
+    const ownBranch = attendanceAdminBranch().toLowerCase();
+    return choices.filter(batch => !ownBranch || batch.toLowerCase().includes(ownBranch));
+  }
+  return choices;
+}
+
+function attendancePaperOptions(batchName = "") {
+  const lower = batchName.toLowerCase();
+  if (lower.includes("cmai") || lower.includes("inter")) return ["P5", "P6", "P7", "P8", "No Lecture"];
+  if (lower.includes("final")) return ["P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "No Lecture"];
+  return ["P1", "P2", "P3", "P4", "No Lecture"];
 }
 
 function selectedAttendanceBatch() {
   return document.getElementById("attendance-batch")?.value || "";
 }
 
-function attendanceSessionsForBatch(batch) {
+function attendanceSessionsForBatch(batch, branch = "") {
   return state.attendanceSessions
     .filter(session => !batch || session.batch === batch)
+    .filter(session => !branch || !session.branch || session.branch === branch)
     .sort((a, b) => `${a.date} ${a.subject}`.localeCompare(`${b.date} ${b.subject}`));
 }
 
 function attendanceRoster() {
-  const manual = state.attendanceStudents.filter(student => !student.archivedAt).map(student => ({ ...student, source: "Manual" }));
+  const manual = state.attendanceStudents.filter(student => !student.archivedAt).map(student => ({ ...student, lastName: student.lastName || student.lastInitial || "", lastInitial: (student.lastName || student.lastInitial || "").slice(0, 1).toUpperCase(), source: "Manual" }));
   const fromLeads = activeLeads()
     .filter(lead => ["Demo Attended", "Converted / Admitted"].includes(lead.status))
     .map(lead => {
@@ -735,6 +806,7 @@ function attendanceRoster() {
       return {
         id: `lead-${lead.id}`,
         firstName,
+        lastName,
         lastInitial: (lastName || "").slice(0, 1).toUpperCase(),
         batch: lead.batch || "Unassigned",
         branch: lead.branch || "Unassigned",
@@ -804,12 +876,18 @@ function renderAttendanceGrid(students, sessions) {
       </tr>
     </thead>
     <tbody>${students.length ? students.map(student => `<tr>
-      <td class="student-col">${escapeHtml(student.firstName || "")}</td>
-      <td class="initial-col">${escapeHtml(student.lastInitial || "")}.</td>
+      <td class="student-col">${attendanceNameCell(student, "firstName")}</td>
+      <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">-</td>`}
       <td class="details-col">${escapeHtml(student.studentType || "")}<br><span class="muted">${escapeHtml(student.source || "")}</span>${student.source === "Manual" ? `<br><button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : ""}</td>
     </tr>`).join("") : `<tr><td colspan="${emptyColspan}" class="attendance-empty">No students yet. Add a student below or mark a lead as Demo Attended / Converted.</td></tr>`}</tbody>
   </table>`;
+}
+
+function attendanceNameCell(student, field) {
+  const value = field === "lastName" ? (student.lastName || student.lastInitial || "") : (student.firstName || "");
+  if (student.source !== "Manual") return escapeHtml(value || "");
+  return `<input class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
 }
 
 function attendanceCell(student, session) {
@@ -972,6 +1050,8 @@ function renderSettings() {
     ["statuses", "Lead Status Options"],
     ["roles", "Roles"],
     ["batches", "Batches"],
+    ["attendanceBatches", "Attendance Batches"],
+    ["professors", "Professors"],
     ["attendanceRemarks", "Attendance Absent Remarks"]
   ];
   document.getElementById("settingsGrid").innerHTML = `
@@ -2748,18 +2828,33 @@ function saveLead(e) {
   render();
 }
 
+function saveAttendanceBatch(e) {
+  e.preventDefault();
+  if (!isSuperAdmin()) return alert("Only Super Admin can create attendance batches.");
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const batch = [data.level, data.attempt, data.location].map(part => String(part || "").trim().replace(/\s+/g, "")).filter(Boolean).join("_");
+  if (!batch) return;
+  addUnique(masters.attendanceBatches, batch);
+  save();
+  e.target.reset();
+  render();
+}
+
 function saveAttendanceStudent(e) {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
+  data.branch = attendanceBatchLocation(data.batch) || attendanceAdminBranch() || "Unassigned";
+  if (!canManageAttendanceBranch(data.branch || "Unassigned")) return alert("You can add attendance students only for your branch.");
   const firstName = titleCase(data.firstName || "");
-  const lastInitial = String(data.lastInitial || "").slice(0, 1).toUpperCase();
-  if (!firstName || !lastInitial) return alert("Enter first name and last name first letter.");
-  if (data.batch && data.batch !== "Unassigned") addUnique(masters.batches, data.batch);
+  const lastName = titleCase(data.lastName || "");
+  const lastInitial = String(lastName || "").slice(0, 1).toUpperCase();
+  if (!firstName || !lastName) return alert("Enter first name and last name.");
+  if (data.batch && data.batch !== "Unassigned") addUnique(masters.attendanceBatches, data.batch);
   if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
   const exists = state.attendanceStudents.some(student =>
     !student.archivedAt &&
     student.firstName.toLowerCase() === firstName.toLowerCase() &&
-    student.lastInitial === lastInitial &&
+    (student.lastName || student.lastInitial || "").toLowerCase() === lastName.toLowerCase() &&
     student.batch === data.batch &&
     student.branch === data.branch
   );
@@ -2767,6 +2862,7 @@ function saveAttendanceStudent(e) {
   state.attendanceStudents.push({
     id: id(),
     firstName,
+    lastName,
     lastInitial,
     batch: data.batch || "Unassigned",
     branch: data.branch || "Unassigned",
@@ -2782,13 +2878,16 @@ function saveAttendanceStudent(e) {
 function saveAttendanceSession(e) {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
-  if (!data.batch || !data.date || !data.subject || !data.prof) return alert("Add batch, date, subject, and professor.");
+  if (!data.batch || !data.date || !data.subject || (!/no lecture/i.test(data.subject) && !data.prof)) return alert("Add batch, date, paper, and professor.");
+  const selectedBranch = attendanceBatchLocation(data.batch) || attendanceAdminBranch() || "Unassigned";
+  if (!canManageAttendanceBranch(selectedBranch)) return alert("You can add lecture columns only for your branch.");
   state.attendanceSessions.push({
     id: id(),
     batch: data.batch,
+    branch: selectedBranch,
     date: data.date,
     subject: titleCase(data.subject || ""),
-    prof: titleCase(data.prof || ""),
+    prof: /no lecture/i.test(data.subject) ? "" : titleCase(data.prof || ""),
     createdAt: new Date().toISOString(),
     createdBy: currentUser?.name || ""
   });
@@ -2800,6 +2899,7 @@ function saveAttendanceSession(e) {
 function archiveAttendanceStudent(studentId) {
   const student = state.attendanceStudents.find(item => item.id === studentId);
   if (!student) return;
+  if (!canManageAttendanceBranch(student.branch || "Unassigned")) return alert("You can archive attendance students only for your branch.");
   if (!confirm(`Archive ${student.firstName} ${student.lastInitial}. from attendance?`)) return;
   student.archivedAt = new Date().toISOString();
   student.archivedBy = currentUser?.name || "";
@@ -2809,6 +2909,7 @@ function archiveAttendanceStudent(studentId) {
 
 function updateAttendanceStatus(value, status) {
   const [studentId, sessionId] = value.split(":");
+  if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can mark attendance only for your branch.");
   const key = attendanceRecordKey(studentId, sessionId);
   const record = state.attendanceRecords[key] || { present: true, remark: "" };
   record.present = status === "absent" ? false : status === "none" ? null : true;
@@ -2820,6 +2921,7 @@ function updateAttendanceStatus(value, status) {
 
 function updateAttendanceRemark(value, remark) {
   const [studentId, sessionId] = value.split(":");
+  if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can update attendance remarks only for your branch.");
   const key = attendanceRecordKey(studentId, sessionId);
   const record = state.attendanceRecords[key] || { present: false, remark: "" };
   record.present = false;
@@ -2831,8 +2933,16 @@ function updateAttendanceRemark(value, remark) {
       const branch = document.getElementById("attendance-branch")?.value || "";
       return !branch || student.branch === branch;
     }),
-    attendanceSessionsForBatch(selectedAttendanceBatch())
+    attendanceSessionsForBatch(selectedAttendanceBatch(), document.getElementById("attendance-branch")?.value || "")
   );
+}
+
+function canManageAttendanceCell(studentId, sessionId) {
+  if (canManageAllAttendance()) return true;
+  const student = attendanceRoster().find(item => item.id === studentId);
+  const session = state.attendanceSessions.find(item => item.id === sessionId);
+  const branch = student?.branch || session?.branch || attendanceAdminBranch();
+  return canManageAttendanceBranch(branch);
 }
 
 function renderLeadCustomFields(lead = {}) {
@@ -3429,6 +3539,10 @@ function routeActions(e) {
 }
 
 function routeSelectActions(e) {
+  if (e.target.closest('#attendanceSessionForm [name="batch"]')) {
+    prepareAttendanceForms();
+    return;
+  }
   const attendanceStatus = e.target.closest("[data-attendance-status]");
   if (attendanceStatus) {
     updateAttendanceStatus(attendanceStatus.dataset.attendanceStatus, attendanceStatus.value);
@@ -3474,6 +3588,22 @@ function routeSelectActions(e) {
   if (action === "assignBranch") assignLeadBranch(leadId);
   if (action === "assignAdmin") assignLeadAdmin(leadId);
   if (action === "archive") archiveLead(leadId);
+}
+
+function routeAttendanceTextEdits(e) {
+  const input = e.target.closest("[data-attendance-student-name]");
+  if (!input) return;
+  const [studentId, field] = input.dataset.attendanceStudentName.split(":");
+  const student = state.attendanceStudents.find(item => item.id === studentId);
+  if (!student) return;
+  if (!canManageAttendanceBranch(student.branch || "Unassigned")) return alert("You can edit attendance students only for your branch.");
+  if (field === "firstName") student.firstName = titleCase(input.value || "");
+  if (field === "lastName") {
+    student.lastName = titleCase(input.value || "");
+    student.lastInitial = student.lastName.slice(0, 1).toUpperCase();
+  }
+  save();
+  renderAttendance();
 }
 
 function assignLeadBranch(leadId) {

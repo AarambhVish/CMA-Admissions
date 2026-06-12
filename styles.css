@@ -432,6 +432,17 @@ td.actions { white-space: nowrap; }
   padding: 3px;
   appearance: auto;
 }
+.attendance-name-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  font-size: 14px;
+}
+.attendance-name-input:focus {
+  outline: 2px solid var(--primary);
+  background: #fff;
+}
 .attendance-empty {
   color: var(--muted);
   text-align: center;

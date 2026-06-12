@@ -122,14 +122,24 @@
         <div id="attendanceGrid" class="table-wrap attendance-wrap"></div>
       </section>
       <details class="panel attendance-entry-panel">
-        <summary>Add Student / Lecture</summary>
+        <summary>Setup Attendance Batch / Students / Lectures</summary>
         <div class="attendance-entry-grid">
+          <form id="attendanceBatchForm" class="form-grid">
+            <strong>Create Attendance Batch</strong>
+            <select name="level" required>
+              <option value="CMAF">CMAF</option>
+              <option value="CMAI">CMAI</option>
+              <option value="CMAFinal">CMA Final</option>
+            </select>
+            <input name="attempt" placeholder="Attempt e.g. D26" required>
+            <select name="location" required></select>
+            <button class="primary">Create Batch</button>
+          </form>
           <form id="attendanceStudentForm" class="form-grid">
             <strong>Add Attendance Student</strong>
             <input name="firstName" placeholder="First name" required>
-            <input name="lastInitial" maxlength="1" placeholder="Last name first letter" required>
+            <input name="lastName" placeholder="Last name" required>
             <select name="batch" required></select>
-            <select name="branch" required></select>
             <select name="studentType">
               <option>Demo</option>
               <option>Admitted</option>
@@ -140,8 +150,9 @@
             <strong>Add Lecture Column</strong>
             <select name="batch" required></select>
             <input name="date" type="date" required>
-            <input name="subject" placeholder="Subject" required>
-            <input name="prof" placeholder="Professor" required>
+            <select name="subject" required></select>
+            <select name="prof" required></select>
+            <span class="bulk-help" data-attendance-branch-note></span>
             <button class="primary">Add Lecture</button>
           </form>
         </div>
