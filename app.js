@@ -727,8 +727,7 @@ function renderAttendanceFilters() {
   const batchChoices = attendanceBatchChoices();
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<button data-clear-attendance-filters type="button">Clear</button>`
+    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`
   ].join("");
   if (!el.dataset.ready) {
     el.dataset.ready = "1";
@@ -779,9 +778,9 @@ function attendanceBatchChoices() {
 
 function attendancePaperOptions(batchName = "") {
   const lower = batchName.toLowerCase();
-  if (lower.includes("cmai") || lower.includes("inter")) return ["P5", "P6", "P7", "P8", "No Lecture"];
-  if (lower.includes("final")) return ["P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "No Lecture"];
-  return ["P1", "P2", "P3", "P4", "No Lecture"];
+  if (lower.includes("cmai") || lower.includes("inter")) return ["P5", "P6", "P7", "P8"];
+  if (lower.includes("final")) return ["P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20"];
+  return ["P1", "P2", "P3", "P4"];
 }
 
 function selectedAttendanceBatch() {
@@ -871,9 +870,7 @@ function attendanceRecordKey(studentId, sessionId) {
 }
 
 function attendanceRecord(studentId, sessionId) {
-  const session = state.attendanceSessions.find(item => item.id === sessionId) || draftSessionFromId(sessionId);
-  const defaultPresent = session && /no lecture/i.test(session.subject || "") ? null : true;
-  return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: defaultPresent, remark: "" };
+  return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: true, remark: "" };
 }
 
 function draftSessionFromId(sessionId) {
@@ -934,14 +931,14 @@ function renderAttendanceGrid(students, sessions) {
       </tr>
       <tr>
         <th class="student-col">First Name</th>
-        <th class="initial-col">Last Name &lt;</th>
+        <th class="initial-col">Last</th>
         ${dateHeaders}
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
       <td class="student-col">${attendanceNameCell(student, "firstName")}</td>
       <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
-      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">-</td>`}
+      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>`;
 }
@@ -949,7 +946,7 @@ function renderAttendanceGrid(students, sessions) {
 function renderManualAttendanceRow(index, sessions) {
   return `<tr>
     <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${index}:firstName" placeholder="<Add Manually>"></td>
-    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${index}:lastName" placeholder="<Add Manually>"></td>
+    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${index}:lastName" placeholder="<Add>"></td>
     ${sessions.map(() => `<td class="attendance-cell empty-lecture"></td>`).join("")}
   </tr>`;
 }
@@ -962,14 +959,13 @@ function attendanceNameCell(student, field) {
 
 function attendanceCell(student, session) {
   const record = attendanceRecord(student.id, session.id);
-  const status = record.present === false ? "absent" : record.present === null ? "no-lecture" : "present";
-  const selected = record.present === false ? "absent" : record.present === null ? "none" : "present";
+  const status = record.present === false ? "absent" : "present";
+  const selected = record.present === false ? "absent" : "present";
   const markKey = `${escapeAttr(student.id)}:${escapeAttr(session.id)}`;
   return `<td class="attendance-cell ${status}">
     <div class="attendance-mark-buttons">
       <button type="button" class="${selected === "present" ? "active" : ""}" data-attendance-mark="${markKey}" data-mark="present">P</button>
       <button type="button" class="${selected === "absent" ? "active absent" : ""}" data-attendance-mark="${markKey}" data-mark="absent">A</button>
-      <button type="button" class="${selected === "none" ? "active" : ""}" data-attendance-mark="${markKey}" data-mark="none">-</button>
     </div>
     ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
         <option value="">Reason</option>
@@ -2949,7 +2945,7 @@ function saveAttendanceStudent(e) {
 function saveAttendanceSession(e) {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
-  if (!data.batch || !data.date || !data.subject || (!/no lecture/i.test(data.subject) && !data.prof)) return alert("Add batch, date, paper, and professor.");
+  if (!data.batch || !data.date || !data.subject || !data.prof) return alert("Add batch, date, paper, and professor.");
   const selectedBranch = attendanceBatchLocation(data.batch) || attendanceAdminBranch() || "Unassigned";
   if (!canManageAttendanceBranch(selectedBranch)) return alert("You can add lecture columns only for your branch.");
   state.attendanceSessions.push({
@@ -2958,7 +2954,7 @@ function saveAttendanceSession(e) {
     branch: selectedBranch,
     date: data.date,
     subject: titleCase(data.subject || ""),
-    prof: /no lecture/i.test(data.subject) ? "" : titleCase(data.prof || ""),
+    prof: titleCase(data.prof || ""),
     createdAt: new Date().toISOString(),
     createdBy: currentUser?.name || ""
   });
@@ -2985,7 +2981,7 @@ function updateAttendanceStatus(value, status) {
   const realSessionId = session?.id || sessionId;
   const key = attendanceRecordKey(studentId, realSessionId);
   const record = state.attendanceRecords[key] || { present: true, remark: "" };
-  record.present = status === "absent" ? false : status === "none" ? null : true;
+  record.present = status === "absent" ? false : true;
   if (record.present !== false) record.remark = "";
   state.attendanceRecords[key] = record;
   save();
@@ -3701,7 +3697,6 @@ function updateAttendanceSessionField(encoded, value) {
     prof: current.prof || masters.professors[0] || ""
   };
   updates[field] = value;
-  if (/no lecture/i.test(updates.subject)) updates.prof = "";
   ensureAttendanceSession(sessionId, updates);
   save();
   renderAttendance();
