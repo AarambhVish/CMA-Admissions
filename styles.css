@@ -207,6 +207,19 @@ textarea { width: 100%; resize: vertical; }
 }
 
 .table-wrap { overflow: auto; }
+#leadTable,
+#archiveTable,
+#followupTable,
+#admissionTable,
+#campaignTable,
+#sourceReport,
+#branchReport,
+#adminPerformance,
+#dashboardFollowups,
+#untouchedLeads {
+  user-select: none;
+  -webkit-user-select: none;
+}
 table {
   width: 100%;
   border-collapse: collapse;

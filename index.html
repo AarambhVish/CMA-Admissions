@@ -18,9 +18,10 @@
       </div>
       <h1>Login</h1>
       <input name="loginId" placeholder="First name, mobile, or email" required>
+      <input name="password" type="password" placeholder="Password" required autocomplete="current-password">
       <button class="primary">Login</button>
       <p id="loginError" class="warning hidden"></p>
-      <p class="bulk-help">For now, login with first name, mobile, or email. No password required.</p>
+      <p class="bulk-help">Existing users without a password will set one on first login.</p>
     </form>
   </section>
 
@@ -52,6 +53,7 @@
         </select>
         <input id="globalSearch" class="search" placeholder="Search name or mobile">
         <button id="addLeadTop" class="primary">+ Lead</button>
+        <button id="changePasswordBtn" type="button">Change Password</button>
         <button id="logoutBtn" type="button" onclick="logoutUser()">Logout</button>
       </div>
     </header>
@@ -226,6 +228,7 @@
             <input name="name" placeholder="Name" required>
             <input name="mobile" placeholder="Mobile">
             <input name="email" placeholder="Email">
+            <input name="password" type="password" placeholder="Set / reset password">
             <select name="role">
               <option>Super Admin</option>
               <option>Lead Manager</option>
@@ -449,6 +452,21 @@
         <button type="button" class="primary" data-import-admission-sheet>Import / Update Admissions</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="passwordDialog">
+    <form id="passwordForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2>Change Password</h2>
+        <button type="button" class="ghost" data-close-password>Close</button>
+      </div>
+      <input name="newPassword" type="password" placeholder="New password" minlength="4" required autocomplete="new-password">
+      <input name="confirmPassword" type="password" placeholder="Confirm password" minlength="4" required autocomplete="new-password">
+      <div class="modal-actions">
+        <button type="button" data-close-password>Cancel</button>
+        <button class="primary">Save Password</button>
+      </div>
+    </form>
   </dialog>
 
   <script src="app.js"></script>

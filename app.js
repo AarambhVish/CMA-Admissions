@@ -170,6 +170,12 @@ function stripSensitiveData(data) {
   return data;
 }
 
+async function hashPassword(password) {
+  const bytes = new TextEncoder().encode(String(password || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function save() {
   state.masters = masters;
   stripSensitiveData(state);
@@ -183,16 +189,32 @@ function loadCurrentUser() {
   updateAuthView();
 }
 
-function loginUser(e) {
+async function loginUser(e) {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target).entries());
   const loginId = normalizeLogin(data.loginId);
+  const password = String(data.password || "");
   const user = state.users.find(u => loginMatchesUser(loginId, u));
   const loginError = document.getElementById("loginError");
   if (!user) {
     loginError.textContent = "User not found. Use first name, full name, mobile, or email.";
     loginError.classList.remove("hidden");
     return;
+  }
+  if (password.length < 4) {
+    loginError.textContent = "Password must be at least 4 characters.";
+    loginError.classList.remove("hidden");
+    return;
+  }
+  const passwordHash = await hashPassword(password);
+  if (user.passwordHash && user.passwordHash !== passwordHash) {
+    loginError.textContent = "Incorrect password.";
+    loginError.classList.remove("hidden");
+    return;
+  }
+  if (!user.passwordHash) {
+    user.passwordHash = passwordHash;
+    save();
   }
   currentUser = user;
   localStorage.setItem(`${storeKey}.currentUserId`, user.id);
@@ -212,10 +234,28 @@ function logoutUser() {
   document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
 }
 
+async function saveOwnPassword(e) {
+  e.preventDefault();
+  if (!currentUser) return;
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  if (data.newPassword.length < 4) return alert("Password must be at least 4 characters.");
+  if (data.newPassword !== data.confirmPassword) return alert("Passwords do not match.");
+  const user = state.users.find(item => item.id === currentUser.id);
+  if (!user) return;
+  user.passwordHash = await hashPassword(data.newPassword);
+  currentUser = user;
+  save();
+  e.target.reset();
+  document.getElementById("passwordDialog").close();
+  alert("Password updated.");
+}
+
 function updateAuthView() {
   document.getElementById("loginScreen").classList.toggle("hidden", Boolean(currentUser) || !hasLoginReady());
   const badge = document.getElementById("currentUserBadge");
   if (badge) badge.textContent = currentUser ? `${currentUser.name} | ${currentUser.role}` : "Setup users";
+  const passwordButton = document.getElementById("changePasswordBtn");
+  if (passwordButton) passwordButton.disabled = !currentUser;
 }
 
 function isSuperAdmin() {
@@ -301,6 +341,9 @@ function bindEvents() {
   });
   document.getElementById("loginForm").addEventListener("submit", loginUser);
   document.getElementById("logoutBtn").addEventListener("click", logoutUser);
+  document.getElementById("changePasswordBtn").addEventListener("click", () => document.getElementById("passwordDialog").showModal());
+  document.querySelectorAll("[data-close-password]").forEach(b => b.addEventListener("click", () => document.getElementById("passwordDialog").close()));
+  document.getElementById("passwordForm").addEventListener("submit", saveOwnPassword);
   document.getElementById("themeSelect").addEventListener("change", e => setTheme(e.target.value));
   document.getElementById("globalSearch").addEventListener("input", render);
   document.getElementById("addLeadTop").addEventListener("click", openLeadForm);
@@ -330,6 +373,24 @@ function bindEvents() {
   document.getElementById("exportCampaigns")?.addEventListener("click", () => alert("Export is disabled."));
   document.body.addEventListener("click", routeActions);
   document.body.addEventListener("change", routeSelectActions);
+  document.addEventListener("copy", blockProtectedCopy);
+  document.addEventListener("cut", blockProtectedCopy);
+  document.addEventListener("contextmenu", blockProtectedContextMenu);
+}
+
+function isProtectedDataElement(element) {
+  return Boolean(element?.closest?.("#leadTable, #archiveTable, #followupTable, #admissionTable, #campaignTable, #sourceReport, #branchReport, #adminPerformance, #dashboardFollowups, #untouchedLeads"));
+}
+
+function blockProtectedCopy(e) {
+  if (!isProtectedDataElement(e.target)) return;
+  e.preventDefault();
+  alert("Copying main CRM data is disabled.");
+}
+
+function blockProtectedContextMenu(e) {
+  if (!isProtectedDataElement(e.target)) return;
+  e.preventDefault();
 }
 
 function hydrateSelects() {
@@ -2493,7 +2554,7 @@ function saveTemplate(e) {
   e.target.reset();
   render();
 }
-function saveUser(e) {
+async function saveUser(e) {
   e.preventDefault();
   if (state.users.length && !isSuperAdmin()) {
     alert("Only Super Admin can add or edit users and tab access.");
@@ -2501,8 +2562,15 @@ function saveUser(e) {
   }
   const data = Object.fromEntries(new FormData(e.target).entries());
   const existingUser = data.id ? state.users.find(user => user.id === data.id) : null;
+  const newPassword = String(data.password || "");
   data.id = data.id || "";
   delete data.password;
+  if (newPassword) {
+    if (newPassword.length < 4) return alert("Password must be at least 4 characters.");
+    data.passwordHash = await hashPassword(newPassword);
+  } else if (existingUser?.passwordHash) {
+    data.passwordHash = existingUser.passwordHash;
+  }
   if (!state.users.length && !data.id) data.role = "Super Admin";
   data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || tabs.map(([key]) => key);
   if (data.id) {
