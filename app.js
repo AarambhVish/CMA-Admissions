@@ -755,10 +755,16 @@ function attendanceStudentName(student) {
 }
 
 function attendanceSessionTitle(session) {
+  const subject = session.subject || "No Lecture";
+  const prof = /no lecture/i.test(subject) ? "" : session.prof;
+  return `${escapeHtml(subject)}${prof ? `<br>${escapeHtml(prof)}` : ""}`;
+}
+
+function attendanceSessionDateTitle(session) {
   const date = new Date(`${session.date}T00:00:00`);
   const day = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { weekday: "short" });
-  const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-  return `<strong>${escapeHtml(shortDate)}</strong><br>${escapeHtml(day)}<br><span>${escapeHtml(session.subject)}</span><br><span class="muted">${escapeHtml(session.prof)}</span>`;
+  const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }).replaceAll(" ", "-");
+  return `${escapeHtml(shortDate)} ${escapeHtml(day)}`.trim();
 }
 
 function attendanceRecordKey(studentId, sessionId) {
@@ -766,37 +772,55 @@ function attendanceRecordKey(studentId, sessionId) {
 }
 
 function attendanceRecord(studentId, sessionId) {
-  return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: true, remark: "" };
+  const session = state.attendanceSessions.find(item => item.id === sessionId);
+  const defaultPresent = session && /no lecture/i.test(session.subject || "") ? null : true;
+  return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: defaultPresent, remark: "" };
 }
 
 function renderAttendanceGrid(students, sessions) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
-  const lectureHeaders = sessions.length
+  const batch = selectedAttendanceBatch() || "All Batches";
+  const branch = document.getElementById("attendance-branch")?.value || "All Branches";
+  const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
-    : `<th class="lecture-col empty-lecture">Add lecture date</th>`;
-  const emptyColspan = 6 + Math.max(1, sessions.length);
+    : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
+  const dateHeaders = sessions.length
+    ? sessions.map(session => `<th class="lecture-col">${attendanceSessionDateTitle(session)}</th>`).join("")
+    : `<th class="lecture-col empty-lecture">Date + Day</th>`;
+  const emptyColspan = 4 + Math.max(1, sessions.length);
   target.innerHTML = `<table class="attendance-table">
-    <thead><tr><th class="student-col">First Name</th><th class="initial-col">L</th><th>Batch</th><th>Branch</th><th>Type</th>${lectureHeaders}<th>Actions</th></tr></thead>
+    <thead>
+      <tr>
+        <th class="attendance-batch-head" colspan="2">${escapeHtml(batch)}<br>${escapeHtml(branch)}</th>
+        ${subjectHeaders}
+        <th class="details-col">&lt;Add more details&gt;</th>
+      </tr>
+      <tr>
+        <th class="student-col">First Name</th>
+        <th class="initial-col">Last Name &lt;</th>
+        ${dateHeaders}
+        <th class="details-col">&lt;Add more details&gt;</th>
+      </tr>
+    </thead>
     <tbody>${students.length ? students.map(student => `<tr>
-      <td class="student-col"><strong>${escapeHtml(student.firstName || "")}</strong><br><span class="muted">${escapeHtml(student.source)}</span></td>
+      <td class="student-col">${escapeHtml(student.firstName || "")}</td>
       <td class="initial-col">${escapeHtml(student.lastInitial || "")}.</td>
-      <td>${escapeHtml(student.batch || "")}</td>
-      <td>${escapeHtml(student.branch || "")}</td>
-      <td>${escapeHtml(student.studentType || "")}</td>
-      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">Add lecture column above/below</td>`}
-      <td>${student.source === "Manual" ? `<button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : "<span class='locked-action'>From leads</span>"}</td>
+      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">-</td>`}
+      <td class="details-col">${escapeHtml(student.studentType || "")}<br><span class="muted">${escapeHtml(student.source || "")}</span>${student.source === "Manual" ? `<br><button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : ""}</td>
     </tr>`).join("") : `<tr><td colspan="${emptyColspan}" class="attendance-empty">No students yet. Add a student below or mark a lead as Demo Attended / Converted.</td></tr>`}</tbody>
   </table>`;
 }
 
 function attendanceCell(student, session) {
   const record = attendanceRecord(student.id, session.id);
-  const status = record.present === false ? "absent" : "present";
+  const status = record.present === false ? "absent" : record.present === null ? "no-lecture" : "present";
+  const selected = record.present === false ? "absent" : record.present === null ? "none" : "present";
   return `<td class="attendance-cell ${status}">
-    <select data-attendance-status="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
-      <option value="present" ${record.present !== false ? "selected" : ""}>Present</option>
-      <option value="absent" ${record.present === false ? "selected" : ""}>Absent</option>
+    <select class="attendance-mark" data-attendance-status="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
+      <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
+      <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
+      <option value="none" ${selected === "none" ? "selected" : ""}>-</option>
     </select>
     <select data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}" ${record.present === false ? "" : "disabled"}>
       <option value="">Remark</option>
@@ -814,7 +838,7 @@ function renderAttendanceReport(students, sessions) {
     students.forEach(student => {
       const record = attendanceRecord(student.id, session.id);
       if (record.present === false) absentRows.push({ student, session, remark: record.remark || "No remark" });
-      else presentCount++;
+      else if (record.present === true) presentCount++;
     });
   });
   target.innerHTML = `
@@ -2787,8 +2811,8 @@ function updateAttendanceStatus(value, status) {
   const [studentId, sessionId] = value.split(":");
   const key = attendanceRecordKey(studentId, sessionId);
   const record = state.attendanceRecords[key] || { present: true, remark: "" };
-  record.present = status !== "absent";
-  if (record.present) record.remark = "";
+  record.present = status === "absent" ? false : status === "none" ? null : true;
+  if (record.present !== false) record.remark = "";
   state.attendanceRecords[key] = record;
   save();
   renderAttendance();

@@ -350,16 +350,19 @@ td.actions { white-space: nowrap; }
 .attendance-table {
   min-width: 980px;
   table-layout: fixed;
+  border-color: #111827;
 }
 .attendance-table th,
 .attendance-table td {
-  min-width: 120px;
-  padding: 7px;
+  min-width: 122px;
+  padding: 4px;
   font-size: 13px;
+  border-color: #111827;
+  color: #020617;
 }
 .attendance-table .student-col {
-  min-width: 150px;
-  width: 150px;
+  min-width: 170px;
+  width: 170px;
   position: sticky;
   left: 0;
   z-index: 3;
@@ -370,11 +373,11 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .initial-col {
-  min-width: 52px;
-  width: 52px;
+  min-width: 112px;
+  width: 112px;
   text-align: center;
   position: sticky;
-  left: 150px;
+  left: 170px;
   z-index: 3;
   background: var(--panel);
   font-weight: 700;
@@ -384,20 +387,50 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .lecture-col {
-  min-width: 155px;
-  width: 155px;
+  min-width: 136px;
+  width: 136px;
   text-align: center;
+  font-size: 16px;
+  line-height: 1.35;
+  background: #fff;
+}
+.attendance-batch-head {
+  min-width: 282px;
+  width: 282px;
+  text-align: center;
+  font-size: 17px;
+  line-height: 1.55;
+  background: #fff;
+}
+.attendance-table .details-col {
+  min-width: 185px;
+  width: 185px;
+  text-align: center;
+  background: #fff;
+  font-size: 14px;
 }
 .attendance-cell {
-  min-width: 155px;
-  width: 155px;
+  min-width: 136px;
+  width: 136px;
   text-align: center;
+  vertical-align: middle;
 }
 .attendance-cell select {
   width: 100%;
   margin-bottom: 6px;
   padding: 7px;
   font-size: 13px;
+}
+.attendance-cell .attendance-mark {
+  width: 56px;
+  min-width: 56px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 3px;
+  appearance: auto;
 }
 .attendance-empty {
   color: var(--muted);
@@ -413,6 +446,9 @@ td.actions { white-space: nowrap; }
 }
 .attendance-cell.absent {
   background: #fef2f2;
+}
+.attendance-cell.no-lecture {
+  background: #fff;
 }
 .attendance-cell.absent select:first-child {
   border-color: #fca5a5;
