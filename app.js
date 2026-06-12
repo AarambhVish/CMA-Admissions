@@ -964,12 +964,13 @@ function attendanceCell(student, session) {
   const record = attendanceRecord(student.id, session.id);
   const status = record.present === false ? "absent" : record.present === null ? "no-lecture" : "present";
   const selected = record.present === false ? "absent" : record.present === null ? "none" : "present";
+  const markKey = `${escapeAttr(student.id)}:${escapeAttr(session.id)}`;
   return `<td class="attendance-cell ${status}">
-    <select class="attendance-mark" data-attendance-status="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
-      <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
-      <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
-      <option value="none" ${selected === "none" ? "selected" : ""}>-</option>
-    </select>
+    <div class="attendance-mark-buttons">
+      <button type="button" class="${selected === "present" ? "active" : ""}" data-attendance-mark="${markKey}" data-mark="present">P</button>
+      <button type="button" class="${selected === "absent" ? "active absent" : ""}" data-attendance-mark="${markKey}" data-mark="absent">A</button>
+      <button type="button" class="${selected === "none" ? "active" : ""}" data-attendance-mark="${markKey}" data-mark="none">-</button>
+    </div>
     ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
         <option value="">Reason</option>
         ${masters.attendanceRemarks.map(remark => `<option ${remark === record.remark ? "selected" : ""}>${escapeHtml(remark)}</option>`).join("")}
@@ -3537,6 +3538,7 @@ function routeActions(e) {
   if (button.dataset.wa) sendWhatsApp(button.dataset.wa);
   if (button.dataset.archiveLead) archiveLead(button.dataset.archiveLead);
   if (button.dataset.archiveAttendanceStudent) archiveAttendanceStudent(button.dataset.archiveAttendanceStudent);
+  if (button.dataset.attendanceMark) updateAttendanceStatus(button.dataset.attendanceMark, button.dataset.mark);
   if (button.dataset.restoreLead) restoreLead(button.dataset.restoreLead);
   if (button.dataset.permanentDelete) permanentlyDeleteLead(button.dataset.permanentDelete);
   if (button.dataset.editUser) editUser(button.dataset.editUser);

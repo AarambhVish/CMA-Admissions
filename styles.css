@@ -337,13 +337,6 @@ td.actions { white-space: nowrap; }
 .attendance-register-panel {
   padding: 10px;
 }
-.attendance-entry-panel {
-  margin-bottom: 10px;
-}
-.attendance-entry-panel summary {
-  cursor: pointer;
-  font-weight: 700;
-}
 .attendance-entry-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -418,25 +411,36 @@ td.actions { white-space: nowrap; }
   text-align: center;
   vertical-align: middle;
 }
-.attendance-cell select {
-  width: 100%;
-  margin-bottom: 0;
-  padding: 3px;
-  font-size: 12px;
+.attendance-mark-buttons {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 28px);
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
 }
-.attendance-cell .attendance-mark {
-  width: 48px;
-  min-width: 48px;
-  border: 0;
-  background: transparent;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 700;
-  padding: 3px;
-  appearance: auto;
+.attendance-mark-buttons button {
+  padding: 4px 0;
+  min-width: 28px;
+  border-radius: 4px;
+  font-weight: 800;
+  line-height: 1;
+  background: #fff;
+}
+.attendance-mark-buttons button.active {
+  background: #dbeafe;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+.attendance-mark-buttons button.absent.active {
+  background: #fee2e2;
+  border-color: #dc2626;
+  color: #b91c1c;
 }
 .attendance-reason {
   margin-top: 4px;
+  width: 100%;
+  padding: 3px;
+  font-size: 12px;
 }
 .attendance-name-input {
   width: 100%;
