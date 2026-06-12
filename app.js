@@ -1,6 +1,6 @@
 const storeKey = "cmaAdmissionCrm.v1";
-const fixedSheetWebAppUrl = "https://script.google.com/macros/s/AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A/exec";
-const fixedDatabaseSpreadsheetUrl = "https://docs.google.com/spreadsheets/d/1GkSbJxbndwWO1sRQL3_yGV-I6fIFAOaPnWcBBfevf5Q/edit?usp=sharing";
+const fixedSheetWebAppUrl = "";
+const fixedDatabaseSpreadsheetUrl = "";
 const cloudReminderMinutes = 10;
 const tabs = [
   ["dashboard", "Dashboard"],
@@ -965,23 +965,7 @@ function renderSettings() {
         <input id="restoreDataFile" class="hidden" type="file" accept="application/json,.json">
       </div>
     </section>
-    <section class="panel">
-      <h2>Google Sheet Database</h2>
-      <p class="bulk-help">Fixed database is connected. The CRM auto-loads on open, auto-saves after edits, and reminds/saves to cloud every ${cloudReminderMinutes} minutes.</p>
-      <div class="form-grid">
-        <input id="databaseSheetLink" value="${escapeAttr(fixedDatabaseSpreadsheetUrl)}" readonly>
-        <input id="sheetWebAppUrl" placeholder="Google Apps Script Web App URL" readonly>
-        <input value="Auto load and auto save is locked ON" readonly>
-      </div>
-      <div class="toolbar">
-        <button data-load-from-sheet type="button">Load all work</button>
-        <button data-save-to-sheet type="button">Save your work</button>
-        <button data-update-old-sheet type="button">Update from Google Sheet</button>
-        <button data-update-admission-sheet type="button">Update Admissions Sheet</button>
-        <button data-sync-leads-admissions class="primary" type="button">Sync Leads + Admissions</button>
-      </div>
-      <p id="sheetSyncStatus" class="bulk-help"></p>
-    </section>`;
+    <p id="sheetSyncStatus" class="bulk-help hidden"></p>`;
 
   bindSettingsForms();
   renderUserTabAccess("settingsUserTabAccess");
@@ -1159,16 +1143,20 @@ function getSheetSyncSettings() {
     const saved = JSON.parse(localStorage.getItem(`${storeKey}.sheetSync`) || "{}");
     return {
       url: normalizeSheetUrl(saved.url) || fixedSheetWebAppUrl,
+      token: String(saved.token || ""),
       auto: true
     };
   } catch {
-    return { url: fixedSheetWebAppUrl, auto: true };
+    return { url: fixedSheetWebAppUrl, token: "", auto: true };
   }
 }
 
 function setSheetSyncSettings(settings = {}) {
+  const existing = getSheetSyncSettings();
+  const url = normalizeSheetUrl(settings.url) || fixedSheetWebAppUrl || existing.url;
   localStorage.setItem(`${storeKey}.sheetSync`, JSON.stringify({
-    url: normalizeSheetUrl(settings.url) || fixedSheetWebAppUrl,
+    url,
+    token: settings.token || existing.token || "",
     auto: true
   }));
 }
@@ -1185,17 +1173,13 @@ function normalizeSheetUrl(url) {
 
 function renderSheetSyncSettings() {
   const settings = getSheetSyncSettings();
-  const sheetLink = document.getElementById("databaseSheetLink");
-  if (sheetLink) sheetLink.value = fixedDatabaseSpreadsheetUrl;
-  const url = document.getElementById("sheetWebAppUrl");
-  if (url) url.value = settings.url || "";
-  setSheetStatus(`Auto sync is ON. App loads from cloud on start and reminds/saves every ${cloudReminderMinutes} minutes.`, "ok");
+  setSheetStatus(settings.url ? `Auto sync is ON. App loads from cloud on start and reminds/saves every ${cloudReminderMinutes} minutes.` : "Cloud sync is hidden and not configured on this device.", settings.url ? "ok" : "info");
 }
 
 function saveSheetSyncSettings() {
-  setSheetSyncSettings({ url: fixedSheetWebAppUrl, auto: true });
+  setSheetSyncSettings({ auto: true });
   startPeriodicSheetSync();
-  setSheetStatus(`Auto sync is ON. Your work saves automatically and every ${cloudReminderMinutes} minutes.`, "ok");
+  setSheetStatus(getSheetSyncSettings().url ? `Auto sync is ON. Your work saves automatically and every ${cloudReminderMinutes} minutes.` : "Cloud sync is hidden and not configured on this device.", getSheetSyncSettings().url ? "ok" : "info");
 }
 
 function setSheetStatus(message, type = "info") {
@@ -1303,13 +1287,14 @@ function startPeriodicSheetSync() {
 function saveToSheet({ silent = false, reminder = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
-    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.", "error");
+    if (!silent) setSheetStatus("Cloud sync is not configured on this device.", "error");
     return;
   }
   if (!silent) setCloudButtonBusy("save", true);
   if (!silent) setSheetStatus(reminder ? "10-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
   const body = new URLSearchParams();
   body.set("mode", "save");
+  if (settings.token) body.set("token", settings.token);
   body.set("payload", JSON.stringify(stripSensitiveData(structuredClone(state))));
   fetch(settings.url, { method: "POST", mode: "no-cors", body })
     .then(() => {
@@ -1329,7 +1314,7 @@ function saveToSheet({ silent = false, reminder = false } = {}) {
 function loadFromSheet({ silent = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
-    if (!silent) setSheetStatus("Paste and save a Google Apps Script Web App URL first.", "error");
+    if (!silent) setSheetStatus("Cloud sync is not configured on this device.", "error");
     return;
   }
   const callbackName = `crmSheetLoad_${Date.now()}`;
@@ -1364,7 +1349,9 @@ function loadFromSheet({ silent = false } = {}) {
   };
   const script = document.createElement("script");
   script.id = callbackName;
-  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=load&callback=${callbackName}&t=${Date.now()}`;
+  const loadParams = new URLSearchParams({ mode: "load", callback: callbackName, t: String(Date.now()) });
+  if (settings.token) loadParams.set("token", settings.token);
+  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}${loadParams.toString()}`;
   script.onerror = () => {
     setSheetStatus("Load failed. Check Web App URL deployment access.", "error");
     if (!silent) setCloudButtonBusy("load", false);
@@ -1375,6 +1362,8 @@ function loadFromSheet({ silent = false } = {}) {
 }
 
 function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
+  alert("Old data import is hidden/disabled in this software.");
+  return;
   if (!isSuperAdmin() && !isLeadManager()) {
     alert("Only Super Admin or Lead Manager can update leads from the old Google Sheet.");
     return;
@@ -1410,6 +1399,8 @@ function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
 }
 
 function syncLeadsAndAdmissions() {
+  alert("Google Sheet import/sync is hidden/disabled in this software.");
+  return;
   if (!isSuperAdmin() && !isLeadManager()) {
     alert("Only Super Admin or Lead Manager can sync leads and admissions.");
     return;
@@ -1867,6 +1858,8 @@ function cssEscape(value) {
 }
 
 function updateFromAdmissionGoogleSheet() {
+  alert("Admission sheet import is hidden/disabled in this software.");
+  return;
   if (!isSuperAdmin() && !isLeadManager()) {
     alert("Only Super Admin or Lead Manager can update admissions from Google Sheet.");
     return;

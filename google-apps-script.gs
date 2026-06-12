@@ -1,8 +1,5 @@
 const SHEET_NAME = "Database";
-const DATABASE_SPREADSHEET_ID = "1GkSbJxbndwWO1sRQL3_yGV-I6fIFAOaPnWcBBfevf5Q";
-const OLD_LEADS_SPREADSHEET_ID = "1yB27fwVWdLY0jzpf6CTwtFQchrVUQHIAMgcw0OILu6s";
 const OLD_LEADS_SHEET_NAME = "Form Responses 1";
-const ADMISSION_SPREADSHEET_ID = "1TfBPncD41S0xCxX7uPOQVJJxltPFET5V8Ez3meJ6hlI";
 const ADMISSION_SHEET_NAMES = ["CMAFC D26", "Inter D26"];
 const ADMISSION_SHEET_PATTERNS = [
   ["cmafc", "d26"],
@@ -11,12 +8,18 @@ const ADMISSION_SHEET_PATTERNS = [
 
 function doGet(e) {
   const callback = (e.parameter.callback || "callback").replace(/[^\w$.]/g, "");
-  const mode = e.parameter.mode || "load";
-  const payload = mode === "legacy"
-    ? readOldLeadResponses_()
-    : mode === "admissions"
-      ? readAdmissionSheets_()
-      : { ok: true, data: readDatabase_() };
+  let payload;
+  try {
+    requireAccess_(e);
+    const mode = e.parameter.mode || "load";
+    payload = mode === "legacy"
+      ? readOldLeadResponses_()
+      : mode === "admissions"
+        ? readAdmissionSheets_()
+        : { ok: true, data: readDatabase_() };
+  } catch (error) {
+    payload = { ok: false, error: error.message };
+  }
   const output = `${callback}(${JSON.stringify(payload)});`;
   return ContentService
     .createTextOutput(output)
@@ -25,6 +28,7 @@ function doGet(e) {
 
 function doPost(e) {
   try {
+    requireAccess_(e);
     const payload = e.parameter.payload || (e.postData && e.postData.contents) || "";
     if (!payload) throw new Error("Missing payload");
     writeDatabase_(JSON.parse(payload));
@@ -54,22 +58,43 @@ function writeDatabase_(data) {
   sheet.getRange("B2").setValue(new Date());
 }
 
+function scriptProperties_() {
+  return PropertiesService.getScriptProperties();
+}
+
+function property_(key) {
+  return scriptProperties_().getProperty(key) || "";
+}
+
+function requiredProperty_(key) {
+  const value = property_(key);
+  if (!value) throw new Error(`Missing private Apps Script property: ${key}`);
+  return value;
+}
+
+function requireAccess_(e) {
+  const expected = property_("CRM_ACCESS_TOKEN");
+  if (!expected) return;
+  const actual = e.parameter.token || "";
+  if (actual !== expected) throw new Error("Unauthorized cloud access");
+}
+
 function getSheet_() {
-  const spreadsheet = SpreadsheetApp.openById(DATABASE_SPREADSHEET_ID);
+  const spreadsheet = SpreadsheetApp.openById(requiredProperty_("DATABASE_SPREADSHEET_ID"));
   let sheet = spreadsheet.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = spreadsheet.insertSheet(SHEET_NAME);
   return sheet;
 }
 
 function readOldLeadResponses_() {
-  const spreadsheet = SpreadsheetApp.openById(OLD_LEADS_SPREADSHEET_ID);
+  const spreadsheet = SpreadsheetApp.openById(requiredProperty_("OLD_LEADS_SPREADSHEET_ID"));
   const sheet = spreadsheet.getSheetByName(OLD_LEADS_SHEET_NAME);
   if (!sheet) throw new Error(`Sheet not found: ${OLD_LEADS_SHEET_NAME}`);
   return readRowsFromSheet_(sheet, OLD_LEADS_SHEET_NAME);
 }
 
 function readAdmissionSheets_() {
-  const spreadsheet = SpreadsheetApp.openById(ADMISSION_SPREADSHEET_ID);
+  const spreadsheet = SpreadsheetApp.openById(requiredProperty_("ADMISSION_SPREADSHEET_ID"));
   const sheets = findAdmissionSheets_(spreadsheet);
   if (!sheets.length) {
     const available = spreadsheet.getSheets().map(sheet => sheet.getName()).join(", ");
