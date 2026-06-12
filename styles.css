@@ -387,8 +387,8 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .lecture-col {
-  min-width: 136px;
-  width: 136px;
+  min-width: 170px;
+  width: 170px;
   text-align: center;
   font-size: 16px;
   line-height: 1.35;
@@ -410,8 +410,8 @@ td.actions { white-space: nowrap; }
   font-size: 14px;
 }
 .attendance-cell {
-  min-width: 136px;
-  width: 136px;
+  min-width: 170px;
+  width: 170px;
   text-align: center;
   vertical-align: middle;
 }
@@ -438,6 +438,20 @@ td.actions { white-space: nowrap; }
   background: transparent;
   padding: 2px;
   font-size: 14px;
+}
+.attendance-header-select {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #111827;
+  border-radius: 0;
+  background: #fff;
+  text-align: center;
+  font-weight: 700;
+  padding: 2px;
+  margin: 0;
+}
+.attendance-header-select + .attendance-header-select {
+  margin-top: 2px;
 }
 .attendance-name-input:focus {
   outline: 2px solid var(--primary);

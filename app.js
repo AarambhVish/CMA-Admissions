@@ -709,9 +709,9 @@ function renderAttendance() {
   prepareAttendanceForms();
   renderAttendanceFilters();
   const batch = selectedAttendanceBatch();
-  const branch = document.getElementById("attendance-branch")?.value || "";
+  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "";
   const students = attendanceRoster().filter(student => !batch || student.batch === batch).filter(student => !branch || student.branch === branch);
-  const sessions = attendanceSessionsForBatch(batch, branch);
+  const sessions = attendanceWeekSessions(batch, branch);
   renderAttendanceGrid(students, sessions);
   renderAttendanceReport(students, sessions);
 }
@@ -796,6 +796,27 @@ function attendanceSessionsForBatch(batch, branch = "") {
     .sort((a, b) => `${a.date} ${a.subject}`.localeCompare(`${b.date} ${b.subject}`));
 }
 
+function attendanceWeekSessions(batch, branch = "") {
+  const saved = attendanceSessionsForBatch(batch, branch);
+  const start = saved[0]?.date || todayDate();
+  const startDate = new Date(`${start}T00:00:00`);
+  return Array.from({ length: 7 }, (_, index) => {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + index);
+    const date = d.toISOString().slice(0, 10);
+    const existing = saved.find(session => session.date === date);
+    return existing || {
+      id: `draft:${date}`,
+      draft: true,
+      batch,
+      branch,
+      date,
+      subject: attendancePaperOptions(batch)[0] || "P1",
+      prof: masters.professors[0] || ""
+    };
+  });
+}
+
 function attendanceRoster() {
   const manual = state.attendanceStudents.filter(student => !student.archivedAt).map(student => ({ ...student, lastName: student.lastName || student.lastInitial || "", lastInitial: (student.lastName || student.lastInitial || "").slice(0, 1).toUpperCase(), source: "Manual" }));
   const fromLeads = activeLeads()
@@ -827,9 +848,16 @@ function attendanceStudentName(student) {
 }
 
 function attendanceSessionTitle(session) {
-  const subject = session.subject || "No Lecture";
-  const prof = /no lecture/i.test(subject) ? "" : session.prof;
-  return `${escapeHtml(subject)}${prof ? `<br>${escapeHtml(prof)}` : ""}`;
+  const papers = attendancePaperOptions(session.batch || selectedAttendanceBatch());
+  const professors = masters.professors.length ? masters.professors : ["Professor"];
+  const subject = session.subject || papers[0] || "P1";
+  const prof = session.prof || professors[0] || "";
+  return `<select class="attendance-header-select" data-attendance-session-field="${escapeAttr(session.id)}:subject:${escapeAttr(session.date)}">
+      ${papers.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
+    </select>
+    <select class="attendance-header-select" data-attendance-session-field="${escapeAttr(session.id)}:prof:${escapeAttr(session.date)}">
+      ${professors.map(name => `<option ${name === prof ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
+    </select>`;
 }
 
 function attendanceSessionDateTitle(session) {
@@ -844,23 +872,61 @@ function attendanceRecordKey(studentId, sessionId) {
 }
 
 function attendanceRecord(studentId, sessionId) {
-  const session = state.attendanceSessions.find(item => item.id === sessionId);
+  const session = state.attendanceSessions.find(item => item.id === sessionId) || draftSessionFromId(sessionId);
   const defaultPresent = session && /no lecture/i.test(session.subject || "") ? null : true;
   return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: defaultPresent, remark: "" };
+}
+
+function draftSessionFromId(sessionId) {
+  if (!String(sessionId || "").startsWith("draft:")) return null;
+  const date = sessionId.replace("draft:", "");
+  const batch = selectedAttendanceBatch();
+  return {
+    id: sessionId,
+    draft: true,
+    batch,
+    branch: attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "",
+    date,
+    subject: attendancePaperOptions(batch)[0] || "P1",
+    prof: masters.professors[0] || ""
+  };
+}
+
+function ensureAttendanceSession(sessionId, overrides = {}) {
+  const existing = state.attendanceSessions.find(item => item.id === sessionId);
+  if (existing) {
+    Object.assign(existing, overrides);
+    return existing;
+  }
+  const draft = draftSessionFromId(sessionId);
+  if (!draft) return null;
+  const session = { ...draft, ...overrides, id: id(), createdAt: new Date().toISOString(), createdBy: currentUser?.name || "" };
+  state.attendanceSessions.push(session);
+  remapAttendanceSessionId(sessionId, session.id);
+  return session;
+}
+
+function remapAttendanceSessionId(oldId, newId) {
+  Object.keys(state.attendanceRecords).forEach(key => {
+    if (!key.startsWith(`${oldId}:`)) return;
+    const nextKey = key.replace(`${oldId}:`, `${newId}:`);
+    state.attendanceRecords[nextKey] = state.attendanceRecords[key];
+    delete state.attendanceRecords[key];
+  });
 }
 
 function renderAttendanceGrid(students, sessions) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
   const batch = selectedAttendanceBatch() || "All Batches";
-  const branch = document.getElementById("attendance-branch")?.value || "All Branches";
+  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "All Branches";
   const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
   const dateHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionDateTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">Date + Day</th>`;
-  const emptyColspan = 4 + Math.max(1, sessions.length);
+  const manualRows = Array.from({ length: Math.max(3, 7 - students.length) }, (_, index) => renderManualAttendanceRow(index, sessions));
   target.innerHTML = `<table class="attendance-table">
     <thead>
       <tr>
@@ -875,13 +941,22 @@ function renderAttendanceGrid(students, sessions) {
         <th class="details-col">&lt;Add more details&gt;</th>
       </tr>
     </thead>
-    <tbody>${students.length ? students.map(student => `<tr>
+    <tbody>${students.map(student => `<tr>
       <td class="student-col">${attendanceNameCell(student, "firstName")}</td>
       <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture">-</td>`}
       <td class="details-col">${escapeHtml(student.studentType || "")}<br><span class="muted">${escapeHtml(student.source || "")}</span>${student.source === "Manual" ? `<br><button data-archive-attendance-student="${student.id}" type="button">Archive</button>` : ""}</td>
-    </tr>`).join("") : `<tr><td colspan="${emptyColspan}" class="attendance-empty">No students yet. Add a student below or mark a lead as Demo Attended / Converted.</td></tr>`}</tbody>
+    </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>`;
+}
+
+function renderManualAttendanceRow(index, sessions) {
+  return `<tr>
+    <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${index}:firstName" placeholder="<Add Manually>"></td>
+    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${index}:lastName" placeholder="<Add Manually>"></td>
+    ${sessions.map(() => `<td class="attendance-cell empty-lecture"></td>`).join("")}
+    <td class="details-col muted">New row</td>
+  </tr>`;
 }
 
 function attendanceNameCell(student, field) {
@@ -2910,7 +2985,9 @@ function archiveAttendanceStudent(studentId) {
 function updateAttendanceStatus(value, status) {
   const [studentId, sessionId] = value.split(":");
   if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can mark attendance only for your branch.");
-  const key = attendanceRecordKey(studentId, sessionId);
+  const session = ensureAttendanceSession(sessionId);
+  const realSessionId = session?.id || sessionId;
+  const key = attendanceRecordKey(studentId, realSessionId);
   const record = state.attendanceRecords[key] || { present: true, remark: "" };
   record.present = status === "absent" ? false : status === "none" ? null : true;
   if (record.present !== false) record.remark = "";
@@ -2922,7 +2999,9 @@ function updateAttendanceStatus(value, status) {
 function updateAttendanceRemark(value, remark) {
   const [studentId, sessionId] = value.split(":");
   if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can update attendance remarks only for your branch.");
-  const key = attendanceRecordKey(studentId, sessionId);
+  const session = ensureAttendanceSession(sessionId);
+  const realSessionId = session?.id || sessionId;
+  const key = attendanceRecordKey(studentId, realSessionId);
   const record = state.attendanceRecords[key] || { present: false, remark: "" };
   record.present = false;
   record.remark = remark;
@@ -3539,6 +3618,11 @@ function routeActions(e) {
 }
 
 function routeSelectActions(e) {
+  const headerField = e.target.closest("[data-attendance-session-field]");
+  if (headerField) {
+    updateAttendanceSessionField(headerField.dataset.attendanceSessionField, headerField.value);
+    return;
+  }
   if (e.target.closest('#attendanceSessionForm [name="batch"]')) {
     prepareAttendanceForms();
     return;
@@ -3591,6 +3675,11 @@ function routeSelectActions(e) {
 }
 
 function routeAttendanceTextEdits(e) {
+  const newStudentInput = e.target.closest("[data-attendance-new-student]");
+  if (newStudentInput) {
+    createAttendanceStudentFromGrid(newStudentInput.dataset.attendanceNewStudent);
+    return;
+  }
   const input = e.target.closest("[data-attendance-student-name]");
   if (!input) return;
   const [studentId, field] = input.dataset.attendanceStudentName.split(":");
@@ -3602,6 +3691,59 @@ function routeAttendanceTextEdits(e) {
     student.lastName = titleCase(input.value || "");
     student.lastInitial = student.lastName.slice(0, 1).toUpperCase();
   }
+  save();
+  renderAttendance();
+}
+
+function updateAttendanceSessionField(encoded, value) {
+  const [sessionId, field, date] = encoded.split(":");
+  const batch = selectedAttendanceBatch();
+  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
+  if (!canManageAttendanceBranch(branch)) return alert("You can edit lecture details only for your branch.");
+  const existing = state.attendanceSessions.find(item => item.id === sessionId);
+  const current = existing || draftSessionFromId(sessionId) || {};
+  const updates = {
+    batch,
+    branch,
+    date: date || current.date,
+    subject: current.subject || attendancePaperOptions(batch)[0] || "P1",
+    prof: current.prof || masters.professors[0] || ""
+  };
+  updates[field] = value;
+  if (/no lecture/i.test(updates.subject)) updates.prof = "";
+  ensureAttendanceSession(sessionId, updates);
+  save();
+  renderAttendance();
+}
+
+function createAttendanceStudentFromGrid(encoded) {
+  const [rowIndex] = encoded.split(":");
+  const first = document.querySelector(`[data-attendance-new-student="${rowIndex}:firstName"]`)?.value.trim();
+  const last = document.querySelector(`[data-attendance-new-student="${rowIndex}:lastName"]`)?.value.trim();
+  if (!first || !last) return;
+  const batch = selectedAttendanceBatch();
+  if (!batch) return alert("Select attendance batch first.");
+  const branch = attendanceBatchLocation(batch) || attendanceAdminBranch() || "Unassigned";
+  if (!canManageAttendanceBranch(branch)) return alert("You can add attendance students only for your branch.");
+  const exists = state.attendanceStudents.some(student =>
+    !student.archivedAt &&
+    student.batch === batch &&
+    student.branch === branch &&
+    student.firstName.toLowerCase() === first.toLowerCase() &&
+    (student.lastName || student.lastInitial || "").toLowerCase() === last.toLowerCase()
+  );
+  if (exists) return;
+  state.attendanceStudents.push({
+    id: id(),
+    firstName: titleCase(first),
+    lastName: titleCase(last),
+    lastInitial: titleCase(last).slice(0, 1).toUpperCase(),
+    batch,
+    branch,
+    studentType: "Demo",
+    createdAt: new Date().toISOString(),
+    createdBy: currentUser?.name || ""
+  });
   save();
   renderAttendance();
 }
