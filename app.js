@@ -419,25 +419,27 @@ function renderDashboard() {
   const pending = leads.filter(l => l.followupAt && l.status !== "Converted / Admitted").length;
   const untouched = untouchedLeads(leads);
   const metrics = [
-    ["Total leads", leads.length],
-    ["New leads", countBy(leads, "status")["New Lead"] || 0],
-    ["Contacted", countBy(leads, "status")["Contacted"] || 0],
-    ["Untouched leads", untouched.length],
-    ["Campaigns", state.campaigns.length],
-    ["Pending follow-ups", pending],
-    ["Overdue follow-ups", overdue],
-    ["Converted", converted],
-    ["Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"],
-    ["Lost leads", (countBy(leads, "status")["Lost Lead"] || 0) + (countBy(leads, "status")["Not Interested"] || 0)]
+    ["Total leads", leads.length, "totalLeads"],
+    ["New leads", countBy(leads, "status")["New Lead"] || 0, "newLeads"],
+    ["Contacted", countBy(leads, "status")["Contacted"] || 0, "contacted"],
+    ["Untouched leads", untouched.length, "untouched"],
+    ["Campaigns", state.campaigns.length, "campaigns"],
+    ["Pending follow-ups", pending, "pendingFollowups"],
+    ["Overdue follow-ups", overdue, "overdueFollowups"],
+    ["Converted", converted, "converted"],
+    ["Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%", "reports"],
+    ["Lost leads", (countBy(leads, "status")["Lost Lead"] || 0) + (countBy(leads, "status")["Not Interested"] || 0), "lost"]
   ];
-  document.getElementById("metricGrid").innerHTML = metrics.map(m => metric(m[0], m[1])).join("");
+  document.getElementById("metricGrid").innerHTML = metrics.map(m => metric(m[0], m[1], m[2])).join("");
   renderBarList("courseChart", countBy(leads, "course"));
   renderAdminPerformance();
   table("dashboardFollowups", leads.filter(l => dueToday(l) || isOverdue(l)), ["Student", "Mobile", "Course", "Admin", "Follow-up", "Status"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, formatDate(l.followupAt), statusText(l.status)]);
   table("untouchedLeads", untouched, ["Student", "Mobile", "Course", "Admin", "Untouched Since"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, untouchedLabel(l)]);
 }
 
-function metric(label, value) { return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`; }
+function metric(label, value, action = "") {
+  return `<button class="metric metric-link" type="button" data-dashboard-metric="${action}" title="Open ${escapeAttr(label)}"><span>${label}</span><strong>${value}</strong></button>`;
+}
 function countBy(rows, key) { return rows.reduce((a, r) => (a[r[key] || "Blank"] = (a[r[key] || "Blank"] || 0) + 1, a), {}); }
 function renderBarList(idName, counts) {
   const max = Math.max(1, ...Object.values(counts));
@@ -450,6 +452,46 @@ function renderAdminPerformance() {
     return { name: u.name, assigned: leads.length, followups: state.followups.filter(f => f.createdBy === u.name).length, pending: leads.filter(l => l.followupAt && !isOverdue(l)).length, converted, ratio: leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%" };
   });
   table("adminPerformance", rows, ["Admin", "Assigned", "Follow-ups", "Pending", "Converted", "Ratio"], r => [r.name, r.assigned, r.followups, r.pending, r.converted, r.ratio]);
+}
+
+function openDashboardMetric(action) {
+  const routes = {
+    totalLeads: { tab: "leads", prefix: "lead", filters: {} },
+    newLeads: { tab: "leads", prefix: "lead", filters: { status: "New Lead" } },
+    contacted: { tab: "leads", prefix: "lead", filters: { status: "Contacted" } },
+    untouched: { tab: "dashboard", scrollTo: "untouchedLeads" },
+    campaigns: { tab: "campaigns" },
+    pendingFollowups: { tab: "followups", prefix: "followup", filters: {} },
+    overdueFollowups: { tab: "followups", prefix: "followup", filters: {} },
+    converted: { tab: "admissions" },
+    reports: { tab: "reports" },
+    lost: { tab: "leads", prefix: "lead", filters: { status: "Lost Lead" } }
+  };
+  const route = routes[action];
+  if (!route) return;
+  if (!canSeeTab(route.tab)) {
+    alert("This tab is not available for your login.");
+    return;
+  }
+  activeTab = route.tab;
+  render();
+  if (route.prefix) {
+    clearFilterValues(route.prefix);
+    Object.entries(route.filters || {}).forEach(([key, value]) => setFilterValue(route.prefix, key, value));
+    render();
+  }
+  if (route.scrollTo) {
+    document.getElementById(route.scrollTo)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function clearFilterValues(prefix) {
+  document.querySelectorAll(`[id^="${prefix}-"]`).forEach(el => { el.value = ""; });
+}
+
+function setFilterValue(prefix, key, value) {
+  const el = document.getElementById(`${prefix}-${key}`);
+  if (el && [...el.options].some(option => option.value === value)) el.value = value;
 }
 
 function renderFilters() {
@@ -2804,6 +2846,7 @@ function routeActions(e) {
   const button = e.target.closest("button");
   if (!button) return;
   if (button.dataset.edit) openLeadForm(state.leads.find(l => l.id === button.dataset.edit));
+  if (button.dataset.dashboardMetric) openDashboardMetric(button.dataset.dashboardMetric);
   if (button.dataset.followup) openFollowup(button.dataset.followup);
   if (button.dataset.admit) openAdmission(button.dataset.admit);
   if (button.dataset.wa) sendWhatsApp(button.dataset.wa);
