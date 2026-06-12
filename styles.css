@@ -256,6 +256,8 @@ textarea { width: 100%; resize: vertical; }
 #archiveTable,
 #followupTable,
 #admissionTable,
+#attendanceGrid,
+#attendanceReport,
 #campaignTable,
 #sourceReport,
 #branchReport,
@@ -325,6 +327,48 @@ td.actions { white-space: nowrap; }
 #campaignTable select[data-campaign-action] {
   width: 100%;
   min-width: 190px;
+}
+.attendance-wrap {
+  margin-bottom: 18px;
+}
+.attendance-table {
+  min-width: 1180px;
+  table-layout: fixed;
+}
+.attendance-table th,
+.attendance-table td {
+  min-width: 150px;
+  padding: 8px;
+}
+.attendance-table .student-col {
+  min-width: 170px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--panel);
+}
+.attendance-table th.student-col {
+  background: #f8fafc;
+  z-index: 4;
+}
+.attendance-cell {
+  min-width: 170px;
+}
+.attendance-cell select {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 7px;
+  font-size: 13px;
+}
+.attendance-cell.present {
+  background: #ecfdf5;
+}
+.attendance-cell.absent {
+  background: #fef2f2;
+}
+.attendance-cell.absent select:first-child {
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 .pill { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 12px; }
 .danger { color: var(--red); }
