@@ -337,6 +337,9 @@ td.actions { white-space: nowrap; }
 .attendance-register-panel {
   padding: 10px;
 }
+.attendance-batch-section {
+  margin-bottom: 18px;
+}
 .attendance-entry-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -437,6 +440,10 @@ td.actions { white-space: nowrap; }
   border-color: #cbd5e1;
   font-weight: 800;
   text-align: center;
+}
+.attendance-status-select:disabled {
+  opacity: 0.55;
+  background: #f8fafc;
 }
 .attendance-reason {
   margin-top: 4px;

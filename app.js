@@ -708,15 +708,23 @@ function renderAdmissions() {
 function renderAttendance() {
   prepareAttendanceForms();
   renderAttendanceFilters();
-  const batch = selectedAttendanceBatch();
-  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "";
+  const selectedBatch = selectedAttendanceBatch();
+  const selectedBranch = document.getElementById("attendance-branch")?.value || "";
   const statusFilter = selectedAttendanceStatusFilter();
-  const sessions = attendanceWeekSessions(batch, branch);
-  const students = attendanceRoster()
-    .filter(student => !batch || student.batch === batch)
-    .filter(student => !branch || student.branch === branch)
-    .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter));
-  renderAttendanceGrid(students, sessions);
+  const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
+  const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
+    if (!selectedBranch || selectedBatch) return true;
+    return (attendanceBatchLocation(batch) || "Unassigned") === selectedBranch;
+  }).map(batch => {
+    const branch = attendanceBatchLocation(batch) || selectedBranch || "";
+    const sessions = attendanceWeekSessions(batch, branch);
+    const students = attendanceRoster()
+      .filter(student => !batch || student.batch === batch)
+      .filter(student => !branch || student.branch === branch)
+      .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter));
+    return { batch, branch, students, sessions };
+  });
+  renderAttendanceGrid(sections);
 }
 
 function renderAttendanceFilters() {
@@ -724,7 +732,7 @@ function renderAttendanceFilters() {
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
   const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
-  const branchOptions = attendanceBranchChoices();
+  const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
     ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || ""
@@ -827,7 +835,7 @@ function attendanceWeekSessions(batch, branch = "") {
     const date = d.toISOString().slice(0, 10);
     const existing = saved.find(session => session.date === date);
     return existing || {
-      id: `draft:${date}`,
+      id: `draft|${encodeURIComponent(batch)}|${date}`,
       draft: true,
       batch,
       branch,
@@ -873,10 +881,10 @@ function attendanceSessionTitle(session) {
   const professors = masters.professors.length ? masters.professors : ["Professor"];
   const subject = session.subject || papers[0] || "P1";
   const prof = session.prof || professors[0] || "";
-  return `<select class="attendance-header-select" data-attendance-session-field="${escapeAttr(session.id)}:subject:${escapeAttr(session.date)}">
+  return `<select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "subject", date: session.date, batch: session.batch, branch: session.branch })}">
       ${papers.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
     </select>
-    <select class="attendance-header-select" data-attendance-session-field="${escapeAttr(session.id)}:prof:${escapeAttr(session.date)}">
+    <select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">
       ${professors.map(name => `<option ${name === prof ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
     </select>`;
 }
@@ -896,10 +904,24 @@ function attendanceRecord(studentId, sessionId) {
   return state.attendanceRecords[attendanceRecordKey(studentId, sessionId)] || { present: true, remark: "" };
 }
 
+function attendancePayload(data) {
+  return encodeURIComponent(JSON.stringify(data));
+}
+
+function parseAttendancePayload(value) {
+  try {
+    return JSON.parse(decodeURIComponent(value || ""));
+  } catch {
+    const [studentId, sessionId] = String(value || "").split(":");
+    return { studentId, sessionId };
+  }
+}
+
 function draftSessionFromId(sessionId) {
-  if (!String(sessionId || "").startsWith("draft:")) return null;
-  const date = sessionId.replace("draft:", "");
-  const batch = selectedAttendanceBatch();
+  if (!String(sessionId || "").startsWith("draft")) return null;
+  const parts = String(sessionId || "").split("|");
+  const batch = parts[1] ? decodeURIComponent(parts[1]) : selectedAttendanceBatch();
+  const date = parts[2] || String(sessionId || "").replace("draft:", "");
   return {
     id: sessionId,
     draft: true,
@@ -912,6 +934,7 @@ function draftSessionFromId(sessionId) {
 }
 
 function ensureAttendanceSession(sessionId, overrides = {}) {
+  overrides = Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined && value !== ""));
   const existing = state.attendanceSessions.find(item => item.id === sessionId);
   if (existing) {
     Object.assign(existing, overrides);
@@ -934,22 +957,27 @@ function remapAttendanceSessionId(oldId, newId) {
   });
 }
 
-function renderAttendanceGrid(students, sessions) {
+function renderAttendanceGrid(sections) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
-  const batch = selectedAttendanceBatch() || "All Batches";
-  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "All Branches";
+  target.innerHTML = sections.map(section => renderAttendanceTable(section)).join("");
+}
+
+function renderAttendanceTable({ batch, branch, students, sessions }) {
+  const batchTitle = batch || "Unassigned";
+  const branchTitle = branch || attendanceBatchLocation(batch) || "All Branches";
   const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
   const dateHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionDateTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">Date + Day</th>`;
-  const manualRows = Array.from({ length: Math.max(3, 7 - students.length) }, (_, index) => renderManualAttendanceRow(index, sessions));
-  target.innerHTML = `<table class="attendance-table">
+  const manualRows = Array.from({ length: Math.max(3, 7 - students.length) }, (_, index) => renderManualAttendanceRow(index, sessions, batchTitle, branchTitle));
+  return `<div class="attendance-batch-section">
+  <table class="attendance-table">
     <thead>
       <tr>
-        <th class="attendance-batch-head" colspan="2">${escapeHtml(batch)}<br>${escapeHtml(branch)}</th>
+        <th class="attendance-batch-head" colspan="2">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
         ${subjectHeaders}
       </tr>
       <tr>
@@ -963,14 +991,15 @@ function renderAttendanceGrid(students, sessions) {
       <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
-  </table>`;
+  </table>
+  </div>`;
 }
 
-function renderManualAttendanceRow(index, sessions) {
+function renderManualAttendanceRow(index, sessions, batch, branch) {
   return `<tr>
-    <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${index}:firstName" placeholder="<Add Manually>"></td>
-    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${index}:lastName" placeholder="<Add>"></td>
-    ${sessions.map(() => `<td class="attendance-cell empty-lecture"></td>`).join("")}
+    <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "firstName", batch, branch })}" placeholder="<Add Manually>"></td>
+    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "lastName", batch, branch })}" placeholder="<Add>"></td>
+    ${sessions.map(() => `<td class="attendance-cell empty-lecture">${disabledAttendanceSelect()}</td>`).join("")}
   </tr>`;
 }
 
@@ -984,17 +1013,24 @@ function attendanceCell(student, session) {
   const record = attendanceRecord(student.id, session.id);
   const status = record.present === false ? "absent" : "present";
   const selected = record.present === false ? "absent" : "present";
-  const markKey = `${escapeAttr(student.id)}:${escapeAttr(session.id)}`;
+  const markKey = attendancePayload({ studentId: student.id, sessionId: session.id, batch: session.batch, branch: session.branch, date: session.date });
   return `<td class="attendance-cell ${status}">
     <select class="attendance-status-select" data-attendance-status="${markKey}">
       <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
       <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
     </select>
-    ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
+    ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${markKey}">
         <option value="">Reason</option>
         ${masters.attendanceRemarks.map(remark => `<option ${remark === record.remark ? "selected" : ""}>${escapeHtml(remark)}</option>`).join("")}
       </select>` : ""}
   </td>`;
+}
+
+function disabledAttendanceSelect() {
+  return `<select class="attendance-status-select" disabled title="Add student name first">
+    <option>P</option>
+    <option>A</option>
+  </select>`;
 }
 
 function renderAttendanceReport(students, sessions) {
@@ -2998,9 +3034,10 @@ function archiveAttendanceStudent(studentId) {
 }
 
 function updateAttendanceStatus(value, status) {
-  const [studentId, sessionId] = value.split(":");
+  const payload = parseAttendancePayload(value);
+  const { studentId, sessionId } = payload;
   if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can mark attendance only for your branch.");
-  const session = ensureAttendanceSession(sessionId);
+  const session = ensureAttendanceSession(sessionId, { batch: payload.batch, branch: payload.branch, date: payload.date });
   const realSessionId = session?.id || sessionId;
   const key = attendanceRecordKey(studentId, realSessionId);
   const record = state.attendanceRecords[key] || { present: true, remark: "" };
@@ -3012,9 +3049,10 @@ function updateAttendanceStatus(value, status) {
 }
 
 function updateAttendanceRemark(value, remark) {
-  const [studentId, sessionId] = value.split(":");
+  const payload = parseAttendancePayload(value);
+  const { studentId, sessionId } = payload;
   if (!canManageAttendanceCell(studentId, sessionId)) return alert("You can update attendance remarks only for your branch.");
-  const session = ensureAttendanceSession(sessionId);
+  const session = ensureAttendanceSession(sessionId, { batch: payload.batch, branch: payload.branch, date: payload.date });
   const realSessionId = session?.id || sessionId;
   const key = attendanceRecordKey(studentId, realSessionId);
   const record = state.attendanceRecords[key] || { present: false, remark: "" };
@@ -3706,9 +3744,10 @@ function routeAttendanceTextEdits(e) {
 }
 
 function updateAttendanceSessionField(encoded, value) {
-  const [sessionId, field, date] = encoded.split(":");
-  const batch = selectedAttendanceBatch();
-  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
+  const payload = parseAttendancePayload(encoded);
+  const { sessionId, field, date } = payload;
+  const batch = payload.batch || selectedAttendanceBatch();
+  const branch = payload.branch || attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
   if (!canManageAttendanceBranch(branch)) return alert("You can edit lecture details only for your branch.");
   const existing = state.attendanceSessions.find(item => item.id === sessionId);
   const current = existing || draftSessionFromId(sessionId) || {};
@@ -3726,13 +3765,17 @@ function updateAttendanceSessionField(encoded, value) {
 }
 
 function createAttendanceStudentFromGrid(encoded) {
-  const [rowIndex] = encoded.split(":");
-  const first = document.querySelector(`[data-attendance-new-student="${rowIndex}:firstName"]`)?.value.trim();
-  const last = document.querySelector(`[data-attendance-new-student="${rowIndex}:lastName"]`)?.value.trim();
+  const payload = parseAttendancePayload(encoded);
+  const rowInputs = [...document.querySelectorAll("[data-attendance-new-student]")].filter(input => {
+    const candidate = parseAttendancePayload(input.dataset.attendanceNewStudent);
+    return candidate.rowIndex === payload.rowIndex && candidate.batch === payload.batch && candidate.branch === payload.branch;
+  });
+  const first = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "firstName")?.value.trim();
+  const last = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "lastName")?.value.trim();
   if (!first || !last) return;
-  const batch = selectedAttendanceBatch();
+  const batch = payload.batch || selectedAttendanceBatch();
   if (!batch) return alert("Select attendance batch first.");
-  const branch = attendanceBatchLocation(batch) || attendanceAdminBranch() || "Unassigned";
+  const branch = payload.branch || attendanceBatchLocation(batch) || attendanceAdminBranch() || "Unassigned";
   if (!canManageAttendanceBranch(branch)) return alert("You can add attendance students only for your branch.");
   const exists = state.attendanceStudents.some(student =>
     !student.archivedAt &&
