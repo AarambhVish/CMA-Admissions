@@ -429,6 +429,15 @@ td.actions { white-space: nowrap; }
   border-color: #dc2626;
   color: #b91c1c;
 }
+.attendance-status-select {
+  width: 54px;
+  min-width: 54px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border-color: #cbd5e1;
+  font-weight: 800;
+  text-align: center;
+}
 .attendance-reason {
   margin-top: 4px;
   width: 100%;

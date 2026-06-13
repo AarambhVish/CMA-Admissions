@@ -710,8 +710,12 @@ function renderAttendance() {
   renderAttendanceFilters();
   const batch = selectedAttendanceBatch();
   const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "";
-  const students = attendanceRoster().filter(student => !batch || student.batch === batch).filter(student => !branch || student.branch === branch);
+  const statusFilter = selectedAttendanceStatusFilter();
   const sessions = attendanceWeekSessions(batch, branch);
+  const students = attendanceRoster()
+    .filter(student => !batch || student.batch === batch)
+    .filter(student => !branch || student.branch === branch)
+    .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter));
   renderAttendanceGrid(students, sessions);
 }
 
@@ -719,6 +723,7 @@ function renderAttendanceFilters() {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
+  const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
   const branchOptions = attendanceBranchChoices();
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
@@ -727,12 +732,30 @@ function renderAttendanceFilters() {
   const batchChoices = attendanceBatchChoices();
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`
+    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
+    `<select id="attendance-status-filter">
+      <option value="">All P / A</option>
+      <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>
+      <option value="absent" ${currentStatus === "absent" ? "selected" : ""}>Only A</option>
+    </select>`
   ].join("");
   if (!el.dataset.ready) {
     el.dataset.ready = "1";
     el.addEventListener("change", renderAttendance);
   }
+}
+
+function selectedAttendanceStatusFilter() {
+  return document.getElementById("attendance-status-filter")?.value || "";
+}
+
+function attendanceStudentMatchesStatus(student, sessions, statusFilter) {
+  if (!statusFilter || !sessions.length) return true;
+  return sessions.some(session => {
+    const record = attendanceRecord(student.id, session.id);
+    const isAbsent = record.present === false;
+    return statusFilter === "absent" ? isAbsent : !isAbsent;
+  });
 }
 
 function attendanceBatchLocation(batchName = "") {
@@ -963,10 +986,10 @@ function attendanceCell(student, session) {
   const selected = record.present === false ? "absent" : "present";
   const markKey = `${escapeAttr(student.id)}:${escapeAttr(session.id)}`;
   return `<td class="attendance-cell ${status}">
-    <div class="attendance-mark-buttons">
-      <button type="button" class="${selected === "present" ? "active" : ""}" data-attendance-mark="${markKey}" data-mark="present">P</button>
-      <button type="button" class="${selected === "absent" ? "active absent" : ""}" data-attendance-mark="${markKey}" data-mark="absent">A</button>
-    </div>
+    <select class="attendance-status-select" data-attendance-status="${markKey}">
+      <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
+      <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
+    </select>
     ${record.present === false ? `<select class="attendance-reason" data-attendance-remark="${escapeAttr(student.id)}:${escapeAttr(session.id)}">
         <option value="">Reason</option>
         ${masters.attendanceRemarks.map(remark => `<option ${remark === record.remark ? "selected" : ""}>${escapeHtml(remark)}</option>`).join("")}
