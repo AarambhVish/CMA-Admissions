@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260614-block2">
+  <link rel="stylesheet" href="styles.css?v=20260614-attendance-designer">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -119,7 +119,7 @@
         </div>
         <div class="filters" id="attendanceFilters"></div>
         <div class="attendance-bulk-box">
-          <textarea id="attendanceBulkNames" rows="3" placeholder="Paste student names here, one per line. Example: Aman R&#10;Dinesh Y&#10;Diana R"></textarea>
+          <textarea id="attendanceBulkNames" rows="3" placeholder="Paste one student per line. Example: Aman R 14-06-2026 A STU001&#10;Dinesh Y 15-06-2026 B ID102&#10;Diana R"></textarea>
           <button type="button" class="primary" id="addAttendanceBulk">Add Students to Selected Batch</button>
         </div>
         <div id="attendanceGrid" class="table-wrap attendance-wrap"></div>
@@ -147,6 +147,7 @@
               <option>A</option>
               <option>B</option>
             </select>
+            <input name="studentId" placeholder="Student ID">
             <select name="batch" required></select>
             <select name="studentType">
               <option>Demo</option>
@@ -532,6 +533,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260614-block2"></script>
+  <script src="app.js?v=20260614-attendance-designer"></script>
 </body>
 </html>

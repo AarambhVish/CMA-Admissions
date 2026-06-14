@@ -30,6 +30,14 @@ const defaultLeadColumns = [
   { key: "actions", label: "Actions" }
 ];
 
+const defaultAttendanceStudentColumns = [
+  { key: "firstName", label: "First Name", width: 126 },
+  { key: "lastName", label: "Last", width: 42 },
+  { key: "admissionDate", label: "Admission Date", width: 108 },
+  { key: "batchGroup", label: "Batch", width: 64 },
+  { key: "studentId", label: "Student ID", width: 92 }
+];
+
 const defaultMasters = {
   courses: ["CMA Foundation", "CMA Intermediate", "CMA Final"],
   branches: ["Andheri", "Borivali", "Dadar", "Thane", "Online"],
@@ -108,6 +116,8 @@ const seed = {
   templates: [],
   targets: [],
   leadColumns: structuredClone(defaultLeadColumns),
+  attendanceStudentColumns: structuredClone(defaultAttendanceStudentColumns),
+  customAttendanceFields: [],
   customLeadFields: [],
   masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
 };
@@ -169,10 +179,16 @@ function normalizeStateDefaults(data) {
     attendanceRemarks: data.masters?.attendanceRemarks || structuredClone(defaultMasters.attendanceRemarks)
   };
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
+  data.attendanceStudentColumns = Array.isArray(data.attendanceStudentColumns) && data.attendanceStudentColumns.length ? data.attendanceStudentColumns : structuredClone(defaultAttendanceStudentColumns);
+  data.customAttendanceFields = Array.isArray(data.customAttendanceFields) ? data.customAttendanceFields : [];
   data.customLeadFields = Array.isArray(data.customLeadFields) ? data.customLeadFields : [];
   data.leads.forEach(lead => {
     if (!lead.customFields) lead.customFields = {};
     Object.keys(lead.customFields).forEach(field => addUnique(data.customLeadFields, field));
+  });
+  data.attendanceStudents.forEach(student => {
+    if (!student.customFields) student.customFields = {};
+    Object.keys(student.customFields).forEach(field => addUnique(data.customAttendanceFields, field));
   });
   data.users.forEach(user => {
     delete user.password;
@@ -1020,6 +1036,8 @@ function renderAttendanceGrid(sections) {
 function renderAttendanceTable({ batch, branch, students, sessions }) {
   const batchTitle = batch || "Unassigned";
   const branchTitle = branch || attendanceBatchLocation(batch) || "All Branches";
+  const infoColumns = activeAttendanceStudentColumns();
+  const infoWidth = infoColumns.reduce((sum, column) => sum + attendanceColumnWidth(column), 0);
   const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
@@ -1031,22 +1049,16 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   <table class="attendance-table">
     <thead>
       <tr>
-        <th class="attendance-batch-head" colspan="4">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
+        <th class="attendance-batch-head" colspan="${infoColumns.length}" style="min-width:${infoWidth}px;width:${infoWidth}px;">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
         ${subjectHeaders}
       </tr>
       <tr>
-        <th class="student-col">First Name</th>
-        <th class="initial-col">Last</th>
-        <th class="admission-date-col">Admission Date</th>
-        <th class="batch-group-col">Batch</th>
+        ${infoColumns.map((column, index) => attendanceInfoHeaderCell(column, index, infoColumns)).join("")}
         ${dateHeaders}
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
-      <td class="student-col">${attendanceStudentFieldCell(student, "firstName")}</td>
-      <td class="initial-col">${attendanceStudentFieldCell(student, "lastName")}</td>
-      <td class="admission-date-col">${attendanceStudentFieldCell(student, "admissionDate")}</td>
-      <td class="batch-group-col">${attendanceStudentFieldCell(student, "batchGroup")}</td>
+      ${infoColumns.map((column, index) => attendanceInfoDataCell(column, index, infoColumns, attendanceStudentFieldCell(student, column.key))).join("")}
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>
@@ -1054,13 +1066,48 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
 }
 
 function renderManualAttendanceRow(index, sessions, batch, branch) {
+  const infoColumns = activeAttendanceStudentColumns();
   return `<tr>
-    <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "firstName", batch, branch })}" placeholder="<Add Manually>"></td>
-    <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "lastName", batch, branch })}" placeholder="<Add>"></td>
-    <td class="admission-date-col"><input class="attendance-name-input" type="date" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "admissionDate", batch, branch })}"></td>
-    <td class="batch-group-col"><select class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "batchGroup", batch, branch })}"><option></option><option>A</option><option>B</option></select></td>
+    ${infoColumns.map((column, columnIndex) => attendanceInfoDataCell(column, columnIndex, infoColumns, manualAttendanceFieldControl(index, column, batch, branch))).join("")}
     ${sessions.map(() => `<td class="attendance-cell empty-lecture">${disabledAttendanceSelect()}</td>`).join("")}
   </tr>`;
+}
+
+function attendanceInfoHeaderCell(column, index, columns) {
+  return `<th class="attendance-info-col" style="${attendanceInfoColumnStyle(column, index, columns)}">${escapeHtml(column.label)}</th>`;
+}
+
+function attendanceInfoDataCell(column, index, columns, content) {
+  return `<td class="attendance-info-col" style="${attendanceInfoColumnStyle(column, index, columns)}">${content}</td>`;
+}
+
+function attendanceInfoColumnStyle(column, index, columns) {
+  const left = columns.slice(0, index).reduce((sum, item) => sum + attendanceColumnWidth(item), 0);
+  const width = attendanceColumnWidth(column);
+  return `min-width:${width}px;width:${width}px;left:${left}px;`;
+}
+
+function attendanceColumnWidth(column) {
+  const fallback = defaultAttendanceStudentColumns.find(item => item.key === column.key)?.width || 96;
+  return Math.max(42, Math.min(180, Number(column.width) || fallback));
+}
+
+function activeAttendanceStudentColumns() {
+  const saved = Array.isArray(state.attendanceStudentColumns) && state.attendanceStudentColumns.length ? state.attendanceStudentColumns : defaultAttendanceStudentColumns;
+  return saved.map(column => ({
+    key: column.key,
+    label: column.label || attendanceColumnLabel(column.key),
+    width: attendanceColumnWidth(column)
+  })).filter(column => column.key);
+}
+
+function manualAttendanceFieldControl(index, column, batch, branch) {
+  const payload = attendancePayload({ rowIndex: index, field: column.key, batch, branch });
+  const placeholder = column.key === "firstName" ? "<Add Manually>" : column.key === "lastName" ? "<Add>" : column.label;
+  if (column.key === "admissionDate") return `<input class="attendance-name-input" type="date" data-attendance-new-student="${payload}">`;
+  if (column.key === "batchGroup") return `<select class="attendance-name-input" data-attendance-new-student="${payload}"><option></option><option>A</option><option>B</option></select>`;
+  if (column.key === "studentType") return `<select class="attendance-name-input" data-attendance-new-student="${payload}"><option>Demo</option><option>Admitted</option></select>`;
+  return `<input class="attendance-name-input" data-attendance-new-student="${payload}" placeholder="${escapeAttr(placeholder)}">`;
 }
 
 function attendanceStudentFieldCell(student, field) {
@@ -1068,14 +1115,23 @@ function attendanceStudentFieldCell(student, field) {
   if (student.source !== "Manual") return escapeHtml(value || "");
   if (field === "admissionDate") return `<input class="attendance-name-input" type="date" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
   if (field === "batchGroup") return `<select class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}"><option></option><option ${value === "A" ? "selected" : ""}>A</option><option ${value === "B" ? "selected" : ""}>B</option></select>`;
+  if (field === "studentType") return `<select class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}"><option ${value === "Demo" ? "selected" : ""}>Demo</option><option ${value === "Admitted" ? "selected" : ""}>Admitted</option></select>`;
   return `<input class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
 }
 
 function attendanceStudentFieldValue(student, field) {
-  if (field === "lastName") return student.lastName || student.lastInitial || "";
+  if (field === "lastName") return lastInitialOnly(student.lastName || student.lastInitial || "");
   if (field === "admissionDate") return student.admissionDate || "";
   if (field === "batchGroup") return student.batchGroup || "";
+  if (field === "studentId") return student.studentId || "";
+  if (field === "studentType") return student.studentType || "";
+  if (field.startsWith("custom:")) return student.customFields?.[field.slice(7)] || "";
   return student.firstName || "";
+}
+
+function lastInitialOnly(value) {
+  const match = String(value || "").trim().match(/[A-Za-z]/);
+  return match ? match[0].toUpperCase() : "";
 }
 
 function attendanceCell(student, session) {
@@ -1251,6 +1307,7 @@ function renderSettings() {
   document.getElementById("settingsGrid").innerHTML = `
     ${groups.map(([key, title]) => renderMasterEditor(key, title)).join("")}
     ${renderLeadColumnDesigner()}
+    ${renderAttendanceColumnDesigner()}
     <section class="panel">
       <h2>Add Admin / User</h2>
       <form id="settingsUserForm" class="form-grid">
@@ -1337,6 +1394,114 @@ function leadColumnOptions() {
     ["actions", "Actions"]
   ].map(([key, label]) => ({ key, label }));
   return [...standard, ...customLeadFieldNames().map(name => ({ key: name, label: `Custom: ${name}` }))];
+}
+
+function renderAttendanceColumnDesigner() {
+  const disabled = !isSuperAdmin() ? "disabled" : "";
+  const options = attendanceColumnOptions();
+  const columns = activeAttendanceStudentColumns();
+  return `<section class="panel lead-column-panel">
+    <h2>Attendance Register Designer</h2>
+    <p class="bulk-help">Super Admin can choose the left-side student information columns for Attendance. Marks against lecture dates are kept separately and will not be deleted.</p>
+    <div class="lead-column-list">
+      ${columns.map((column, index) => `<div class="lead-column-row" data-attendance-column-row="${index}">
+        <select data-attendance-column-key ${disabled}>
+          ${options.map(option => `<option value="${escapeAttr(option.key)}" ${option.key === column.key ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+        </select>
+        <input data-attendance-column-label value="${escapeAttr(column.label)}" placeholder="Column heading" ${disabled}>
+        <input data-attendance-column-width type="number" min="42" max="180" value="${escapeAttr(attendanceColumnWidth(column))}" placeholder="Width" ${disabled}>
+        <button class="pill-remove" data-remove-attendance-column="${index}" type="button" title="Remove" ${disabled}>x</button>
+      </div>`).join("")}
+    </div>
+    <div class="toolbar">
+      <button data-add-attendance-column type="button" ${disabled}>Add Column</button>
+      <button data-save-attendance-columns class="primary" type="button" ${disabled}>Save Attendance Layout</button>
+      <button data-reset-attendance-columns type="button" ${disabled}>Reset Default</button>
+    </div>
+    <div class="form-grid">
+      <input id="newCustomAttendanceField" placeholder="Add custom attendance field e.g. Student ID, Roll No., Fees Status" ${disabled}>
+      <button data-add-custom-attendance-field type="button" ${disabled}>Add Attendance Field</button>
+    </div>
+  </section>`;
+}
+
+function attendanceColumnOptions() {
+  const standard = [
+    ["firstName", "First Name"],
+    ["lastName", "Last Name First Letter"],
+    ["admissionDate", "Admission Date"],
+    ["batchGroup", "Batch A/B"],
+    ["studentId", "Student ID"],
+    ["studentType", "Student Type"]
+  ].map(([key, label]) => ({ key, label }));
+  return [...standard, ...customAttendanceFieldNames().map(name => ({ key: `custom:${name}`, label: `Custom: ${name}` }))];
+}
+
+function customAttendanceFieldNames() {
+  const fromStudents = state.attendanceStudents.flatMap(student => Object.keys(student.customFields || {}));
+  return [...new Set([...(state.customAttendanceFields || []), ...fromStudents])].filter(Boolean).sort();
+}
+
+function attendanceColumnLabel(key) {
+  return attendanceColumnOptions().find(option => option.key === key)?.label?.replace(/^Custom: /, "") || key.replace(/^custom:/, "");
+}
+
+function addAttendanceColumn() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit attendance columns.");
+  const options = attendanceColumnOptions();
+  const currentKeys = activeAttendanceStudentColumns().map(column => column.key);
+  const next = options.find(option => !currentKeys.includes(option.key)) || options[0];
+  state.attendanceStudentColumns = [...activeAttendanceStudentColumns(), { key: next.key, label: next.label.replace(/^Custom: /, ""), width: defaultAttendanceWidth(next.key) }];
+  save();
+  render();
+}
+
+function addCustomAttendanceField() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit attendance columns.");
+  const input = document.getElementById("newCustomAttendanceField");
+  const fieldName = input?.value.trim();
+  if (!fieldName) return;
+  addUnique(state.customAttendanceFields, fieldName);
+  const key = `custom:${fieldName}`;
+  if (!activeAttendanceStudentColumns().some(column => column.key === key)) {
+    state.attendanceStudentColumns = [...activeAttendanceStudentColumns(), { key, label: fieldName, width: 96 }];
+  }
+  save();
+  render();
+}
+
+function removeAttendanceColumn(index) {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit attendance columns.");
+  if (!confirm("Remove this column from the Attendance register view? Data will not be deleted.")) return;
+  state.attendanceStudentColumns = activeAttendanceStudentColumns().filter((_, i) => i !== index);
+  if (!state.attendanceStudentColumns.length) state.attendanceStudentColumns = structuredClone(defaultAttendanceStudentColumns);
+  save();
+  render();
+}
+
+function saveAttendanceColumnsFromDesigner() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit attendance columns.");
+  const rows = [...document.querySelectorAll("[data-attendance-column-row]")];
+  state.attendanceStudentColumns = rows.map(row => {
+    const key = row.querySelector("[data-attendance-column-key]")?.value;
+    const label = row.querySelector("[data-attendance-column-label]")?.value.trim() || attendanceColumnLabel(key);
+    const width = Number(row.querySelector("[data-attendance-column-width]")?.value) || defaultAttendanceWidth(key);
+    return { key, label, width };
+  }).filter(column => column.key);
+  save();
+  render();
+}
+
+function resetAttendanceColumns() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit attendance columns.");
+  if (!confirm("Reset Attendance register columns to the default view?")) return;
+  state.attendanceStudentColumns = structuredClone(defaultAttendanceStudentColumns);
+  save();
+  render();
+}
+
+function defaultAttendanceWidth(key) {
+  return defaultAttendanceStudentColumns.find(column => column.key === key)?.width || 96;
 }
 
 function customLeadFieldNames() {
@@ -3042,7 +3207,7 @@ function saveAttendanceStudent(e) {
   data.branch = attendanceBatchLocation(data.batch) || attendanceAdminBranch() || "Unassigned";
   if (!canManageAttendanceBranch(data.branch || "Unassigned")) return alert("You can add attendance students only for your branch.");
   const firstName = titleCase(data.firstName || "");
-  const lastName = titleCase(data.lastName || "");
+  const lastName = lastInitialOnly(data.lastName || "");
   const lastInitial = String(lastName || "").slice(0, 1).toUpperCase();
   if (!firstName || !lastName) return alert("Enter first name and last name.");
   if (data.batch && data.batch !== "Unassigned") addUnique(masters.attendanceBatches, data.batch);
@@ -3062,6 +3227,8 @@ function saveAttendanceStudent(e) {
     lastInitial,
     admissionDate: data.admissionDate || "",
     batchGroup: data.batchGroup || "",
+    studentId: data.studentId || "",
+    customFields: {},
     batch: data.batch || "Unassigned",
     branch: data.branch || "Unassigned",
     studentType: data.studentType || "Demo",
@@ -3734,6 +3901,11 @@ function routeActions(e) {
   if (button.dataset.saveLeadColumns !== undefined) saveLeadColumnsFromDesigner();
   if (button.dataset.resetLeadColumns !== undefined) resetLeadColumns();
   if (button.dataset.removeLeadColumn !== undefined) removeLeadColumn(Number(button.dataset.removeLeadColumn));
+  if (button.dataset.addAttendanceColumn !== undefined) addAttendanceColumn();
+  if (button.dataset.addCustomAttendanceField !== undefined) addCustomAttendanceField();
+  if (button.dataset.saveAttendanceColumns !== undefined) saveAttendanceColumnsFromDesigner();
+  if (button.dataset.resetAttendanceColumns !== undefined) resetAttendanceColumns();
+  if (button.dataset.removeAttendanceColumn !== undefined) removeAttendanceColumn(Number(button.dataset.removeAttendanceColumn));
   if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
   if (button.dataset.saveToSheet !== undefined) saveToSheet();
@@ -3844,11 +4016,17 @@ function routeAttendanceTextEdits(e) {
   if (!canManageAttendanceBranch(student.branch || "Unassigned")) return alert("You can edit attendance students only for your branch.");
   if (field === "firstName") student.firstName = titleCase(input.value || "");
   if (field === "lastName") {
-    student.lastName = titleCase(input.value || "");
+    student.lastName = lastInitialOnly(input.value || "");
     student.lastInitial = student.lastName.slice(0, 1).toUpperCase();
   }
   if (field === "admissionDate") student.admissionDate = input.value || "";
   if (field === "batchGroup") student.batchGroup = input.value || "";
+  if (field === "studentId") student.studentId = input.value || "";
+  if (field === "studentType") student.studentType = input.value || "Demo";
+  if (field.startsWith("custom:")) {
+    student.customFields = student.customFields || {};
+    student.customFields[field.slice(7)] = input.value || "";
+  }
   save();
   renderAttendance();
 }
@@ -3885,6 +4063,13 @@ function createAttendanceStudentFromGrid(encoded) {
   const last = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "lastName")?.value.trim();
   const admissionDate = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "admissionDate")?.value || "";
   const batchGroup = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "batchGroup")?.value || "";
+  const studentId = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "studentId")?.value.trim() || "";
+  const studentType = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "studentType")?.value || "Demo";
+  const customFields = {};
+  rowInputs.forEach(input => {
+    const field = parseAttendancePayload(input.dataset.attendanceNewStudent).field || "";
+    if (field.startsWith("custom:") && input.value.trim()) customFields[field.slice(7)] = input.value.trim();
+  });
   if (!first || !last) return;
   const batch = payload.batch || selectedAttendanceBatch();
   if (!batch) return alert("Select attendance batch first.");
@@ -3901,13 +4086,15 @@ function createAttendanceStudentFromGrid(encoded) {
   state.attendanceStudents.push({
     id: id(),
     firstName: titleCase(first),
-    lastName: titleCase(last),
-    lastInitial: titleCase(last).slice(0, 1).toUpperCase(),
+    lastName: lastInitialOnly(last),
+    lastInitial: lastInitialOnly(last),
     admissionDate,
     batchGroup,
+    studentId,
+    customFields,
     batch,
     branch,
-    studentType: "Demo",
+    studentType,
     createdAt: new Date().toISOString(),
     createdBy: currentUser?.name || ""
   });
@@ -3945,6 +4132,8 @@ function addBulkAttendanceStudents() {
       lastInitial: student.lastName.slice(0, 1).toUpperCase(),
       admissionDate: student.admissionDate || "",
       batchGroup: student.batchGroup || "",
+      studentId: student.studentId || "",
+      customFields: student.customFields || {},
       batch,
       branch,
       studentType: "Demo",
@@ -3970,17 +4159,27 @@ function parseAttendanceNames(text) {
       if (!parts.length) return null;
       const batchGroupIndex = parts.findIndex(part => /^[AB]$/i.test(part));
       const batchGroup = batchGroupIndex >= 0 ? parts.splice(batchGroupIndex, 1)[0].toUpperCase() : "";
-      const dateIndex = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(part));
+      const dateIndex = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(part) || /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(part));
       const admissionDate = dateIndex >= 0 ? normalizeDateInput(parts.splice(dateIndex, 1)[0]) : "";
+      const studentIdIndex = parts.findIndex(part => /^(?:id|sid|studentid)[:#-]?[a-z0-9-]+$/i.test(part) || /^[a-z]{1,6}\d{2,}[a-z0-9-]*$/i.test(part) || /^\d{3,}$/.test(part));
+      const studentId = studentIdIndex >= 0 ? parts.splice(studentIdIndex, 1)[0].replace(/^(?:id|sid|studentid)[:#-]?/i, "") : "";
       const firstName = titleCase(parts[0]);
-      const lastName = titleCase(parts.slice(1).join(" "));
-      return firstName ? { firstName, lastName, admissionDate, batchGroup } : null;
+      const lastToken = parts.slice(1).find(part => /^[A-Za-z]/.test(part)) || "";
+      const lastName = lastInitialOnly(lastToken);
+      return firstName ? { firstName, lastName, admissionDate, batchGroup, studentId } : null;
     })
     .filter(Boolean);
 }
 
 function normalizeDateInput(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const monthNames = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+  const monthText = String(value || "").match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
+  if (monthText) {
+    const year = monthText[3].length === 2 ? `20${monthText[3]}` : monthText[3];
+    const month = monthNames[monthText[2].toLowerCase()];
+    return month ? `${year}-${month}-${monthText[1].padStart(2, "0")}` : "";
+  }
   const match = String(value || "").match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
   if (!match) return "";
   const [, day, month, year] = match;
