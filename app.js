@@ -893,8 +893,8 @@ function attendanceWeekSessions(batch, branch = "") {
       batch,
       branch,
       date,
-      subject: attendancePaperOptions(batch)[0] || "P1",
-      prof: masters.professors[0] || ""
+      subject: "",
+      prof: ""
     };
   });
 }
@@ -934,10 +934,10 @@ function attendanceStudentName(student) {
 
 function attendanceSessionTitle(session) {
   const papers = attendancePaperOptions(session.batch || selectedAttendanceBatch());
-  const professors = masters.professors.length ? masters.professors : ["Professor"];
-  const subject = session.subject || papers[0] || "P1";
-  const prof = session.prof || professors[0] || "";
+  const subject = session.subject || "";
+  const prof = session.prof || "";
   return `<select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "subject", date: session.date, batch: session.batch, branch: session.branch })}">
+      <option value="">Paper</option>
       ${papers.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
     </select>
     <input class="attendance-header-select" list="attendanceProfessorList" value="${escapeAttr(prof)}" placeholder="Professor" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">`;
@@ -982,8 +982,8 @@ function draftSessionFromId(sessionId) {
     batch,
     branch: attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || "",
     date,
-    subject: attendancePaperOptions(batch)[0] || "P1",
-    prof: masters.professors[0] || ""
+    subject: "",
+    prof: ""
   };
 }
 
@@ -3865,8 +3865,8 @@ function updateAttendanceSessionField(encoded, value) {
     batch,
     branch,
     date: date || current.date,
-    subject: current.subject || attendancePaperOptions(batch)[0] || "P1",
-    prof: current.prof || masters.professors[0] || ""
+    subject: current.subject || "",
+    prof: current.prof || ""
   };
   updates[field] = field === "prof" ? titleCase(value || "") : value;
   if (field === "prof" && updates[field]) addUnique(masters.professors, updates[field]);
