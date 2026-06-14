@@ -163,11 +163,13 @@ function normalizeStateDefaults(data) {
   data.attendanceStudents = data.attendanceStudents || [];
   data.attendanceSessions = data.attendanceSessions || [];
   data.attendanceRecords = data.attendanceRecords || {};
-  if (!data.attendanceStudentsClearedForHeaderImportV2) {
+  if (!data.attendanceRegisterResetV3) {
     data.attendanceStudents = [];
+    data.attendanceSessions = [];
     data.attendanceRecords = {};
     data.attendanceStudentsClearedForHeaderImport = true;
     data.attendanceStudentsClearedForHeaderImportV2 = true;
+    data.attendanceRegisterResetV3 = true;
   }
   data.campaigns = data.campaigns || [];
   data.users = data.users || [];
@@ -923,27 +925,8 @@ function attendanceWeekSessions(batch, branch = "") {
 
 function attendanceRoster() {
   const manual = state.attendanceStudents.filter(student => !student.archivedAt).map(student => ({ ...student, lastName: student.lastName || student.lastInitial || "", lastInitial: (student.lastName || student.lastInitial || "").slice(0, 1).toUpperCase(), source: "Manual" }));
-  const fromLeads = activeLeads()
-    .filter(lead => ["Demo Attended", "Converted / Admitted"].includes(lead.status))
-    .map(lead => {
-      const firstName = lead.firstName || firstNameOf(displayLeadName(lead));
-      const lastName = lead.lastName || displayLeadName(lead).split(/\s+/).slice(1).join(" ");
-      const admission = state.admissions.find(item => item.leadId === lead.id);
-      return {
-        id: `lead-${lead.id}`,
-        firstName,
-        lastName,
-        lastInitial: (lastName || "").slice(0, 1).toUpperCase(),
-        admissionDate: admission?.admissionDate || "",
-        batchGroup: "",
-        batch: lead.batch || "Unassigned",
-        branch: lead.branch || "Unassigned",
-        studentType: lead.status === "Converted / Admitted" ? "Admitted" : "Demo",
-        source: "Lead"
-      };
-    });
   const byKey = new Map();
-  [...manual, ...fromLeads].forEach(student => {
+  manual.forEach(student => {
     const key = `${student.batch}|${student.branch}|${student.firstName}|${student.lastInitial}`.toLowerCase();
     if (!byKey.has(key)) byKey.set(key, student);
   });
