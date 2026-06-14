@@ -322,14 +322,26 @@ function canSuperAdminEditAttendance() {
 }
 
 function attendanceAdminBranch() {
-  return currentUser?.branch && currentUser.branch !== "Unassigned" ? currentUser.branch : "";
+  return userBranchList(currentUser)[0] || "";
+}
+
+function userBranchList(user = currentUser) {
+  const list = Array.isArray(user?.branchAccess) ? user.branchAccess : [];
+  const branches = [...list];
+  if (user?.branch && user.branch !== "Unassigned") branches.unshift(user.branch);
+  return [...new Set(branches.map(branch => String(branch || "").trim()).filter(branch => branch && branch !== "Unassigned"))];
+}
+
+function userBranchLabel(user) {
+  const branches = userBranchList(user);
+  return branches.length ? branches.join(", ") : user?.branch || "Unassigned";
 }
 
 function canManageAttendanceBranch(branch) {
   if (!currentUser) return false;
   if (canSuperAdminEditAttendance() || isLeadManager()) return true;
-  const ownBranch = attendanceAdminBranch();
-  return Boolean(ownBranch && branch === ownBranch);
+  const ownBranches = userBranchList(currentUser);
+  return ownBranches.includes(branch);
 }
 
 function hasLoginReady() {
@@ -452,6 +464,7 @@ function blockProtectedContextMenu(e) {
 function hydrateSelects() {
   fillSelects("course", masters.courses);
   fillSelects("branch", masters.branches);
+  fillSelects("branchAccess", masters.branches);
   fillSelects("source", masters.sources);
   fillSelects("status", masters.statuses);
   fillSelects("stage", masters.statuses);
@@ -780,7 +793,7 @@ function attendanceBatchLocation(batchName = "") {
 }
 
 function attendanceBranchChoices() {
-  if (!canManageAllAttendance()) return [attendanceAdminBranch() || "Unassigned"];
+  if (!canManageAllAttendance()) return userBranchList(currentUser).length ? userBranchList(currentUser) : ["Unassigned"];
   return withUnassigned(masters.branches);
 }
 
@@ -809,8 +822,8 @@ function prepareAttendanceForms() {
 function attendanceBatchChoices() {
   const choices = [...new Set([...(masters.attendanceBatches || []), ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch)].filter(Boolean))];
   if (!canManageAllAttendance()) {
-    const ownBranch = attendanceAdminBranch().toLowerCase();
-    return choices.filter(batch => !ownBranch || batch.toLowerCase().includes(ownBranch));
+    const ownBranches = userBranchList(currentUser).map(branch => branch.toLowerCase());
+    return choices.filter(batch => !ownBranches.length || ownBranches.some(branch => batch.toLowerCase().includes(branch)));
   }
   return choices;
 }
@@ -1155,12 +1168,12 @@ function renderGroupReport(idName, leads, key) {
 
 function renderUsers() {
   renderUserTabAccess("userTabAccess");
-  table("userList", state.users, ["Name", "Mobile", "Email", "Role", "Branch", "Tabs", "Login", "Actions"], u => [
+  table("userList", state.users, ["Name", "Mobile", "Email", "Role", "Locations", "Tabs", "Login", "Actions"], u => [
     u.name,
     u.mobile,
     u.email,
     u.role,
-    u.branch,
+    userBranchLabel(u),
     userAccessLabel(u),
     "First name / mobile / email",
     isSuperAdmin() ? `<button data-edit-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
@@ -1168,10 +1181,10 @@ function renderUsers() {
 }
 
 function renderSettingsUsers() {
-  table("settingsUserList", state.users, ["Name", "Role", "Branch", "Tabs", "Login", "Actions"], u => [
+  table("settingsUserList", state.users, ["Name", "Role", "Locations", "Tabs", "Login", "Actions"], u => [
     u.name,
     u.role,
-    u.branch,
+    userBranchLabel(u),
     userAccessLabel(u),
     "First name / mobile / email",
     isSuperAdmin() ? `<button data-edit-settings-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
@@ -1200,7 +1213,8 @@ function renderSettings() {
         <input name="mobile" placeholder="Mobile">
         <input name="email" placeholder="Email">
         <select name="role">${masters.roles.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
-        <select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
+        <label>Primary Branch<select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select></label>
+        <label>Allowed Locations<select name="branchAccess" multiple size="5">${masters.branches.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select></label>
         <div id="settingsUserTabAccess" class="access-list"></div>
         <button class="primary">Save Admin</button>
       </form>
@@ -3197,8 +3211,13 @@ async function saveUser(e) {
     alert("Only Super Admin can add or edit users and tab access.");
     return;
   }
-  const data = Object.fromEntries(new FormData(e.target).entries());
+  const formData = new FormData(e.target);
+  const data = Object.fromEntries(formData.entries());
   const existingUser = data.id ? state.users.find(user => user.id === data.id) : null;
+  data.branchAccess = formData.getAll("branchAccess").filter(Boolean);
+  if (data.branch && data.branch !== "Unassigned" && !data.branchAccess.includes(data.branch)) {
+    data.branchAccess.unshift(data.branch);
+  }
   const newPassword = String(data.password || "");
   data.id = data.id || "";
   delete data.password;
@@ -3235,6 +3254,7 @@ function editUser(userId) {
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
+  setMultiSelectValues(form.elements.branchAccess, userBranchList(user));
   renderUserTabAccess("userTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -3246,8 +3266,16 @@ function editSettingsUser(userId) {
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
+  setMultiSelectValues(form.elements.branchAccess, userBranchList(user));
   renderUserTabAccess("settingsUserTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function setMultiSelectValues(select, values = []) {
+  if (!select) return;
+  [...select.options].forEach(option => {
+    option.selected = values.includes(option.value);
+  });
 }
 
 function parseBulk() {
