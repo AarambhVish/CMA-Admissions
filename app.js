@@ -709,7 +709,7 @@ function renderAttendance() {
   prepareAttendanceForms();
   renderAttendanceFilters();
   const selectedBatch = selectedAttendanceBatch();
-  const selectedBranch = document.getElementById("attendance-branch")?.value || "";
+  const selectedBranch = selectedBatch ? document.getElementById("attendance-branch")?.value || "" : "";
   const statusFilter = selectedAttendanceStatusFilter();
   const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
   const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
@@ -735,7 +735,7 @@ function renderAttendanceFilters() {
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
-    ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || ""
+    ? currentBatch ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || "" : ""
     : adminBranch;
   const batchChoices = attendanceBatchChoices();
   el.innerHTML = [
@@ -1028,8 +1028,7 @@ function attendanceCell(student, session) {
 
 function disabledAttendanceSelect() {
   return `<select class="attendance-status-select" disabled title="Add student name first">
-    <option>P</option>
-    <option>A</option>
+    <option>P / A</option>
   </select>`;
 }
 
