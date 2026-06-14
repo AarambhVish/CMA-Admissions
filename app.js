@@ -153,12 +153,6 @@ function load() {
     loaded.planningSeeded = true;
     localStorage.setItem(storeKey, JSON.stringify(loaded));
   }
-  if (!loaded.attendanceStudentsClearedForHeaderImport) {
-    loaded.attendanceStudents = [];
-    loaded.attendanceRecords = {};
-    loaded.attendanceStudentsClearedForHeaderImport = true;
-    localStorage.setItem(storeKey, JSON.stringify(loaded));
-  }
   return loaded;
 }
 
@@ -169,6 +163,12 @@ function normalizeStateDefaults(data) {
   data.attendanceStudents = data.attendanceStudents || [];
   data.attendanceSessions = data.attendanceSessions || [];
   data.attendanceRecords = data.attendanceRecords || {};
+  if (!data.attendanceStudentsClearedForHeaderImportV2) {
+    data.attendanceStudents = [];
+    data.attendanceRecords = {};
+    data.attendanceStudentsClearedForHeaderImport = true;
+    data.attendanceStudentsClearedForHeaderImportV2 = true;
+  }
   data.campaigns = data.campaigns || [];
   data.users = data.users || [];
   data.templates = data.templates || [];
