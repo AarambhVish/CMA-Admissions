@@ -153,6 +153,12 @@ function load() {
     loaded.planningSeeded = true;
     localStorage.setItem(storeKey, JSON.stringify(loaded));
   }
+  if (!loaded.attendanceStudentsClearedForHeaderImport) {
+    loaded.attendanceStudents = [];
+    loaded.attendanceRecords = {};
+    loaded.attendanceStudentsClearedForHeaderImport = true;
+    localStorage.setItem(storeKey, JSON.stringify(loaded));
+  }
   return loaded;
 }
 
@@ -4136,7 +4142,7 @@ function addBulkAttendanceStudents() {
       customFields: student.customFields || {},
       batch,
       branch,
-      studentType: "Demo",
+      studentType: student.studentType || "Demo",
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.name || ""
     });
@@ -4149,26 +4155,88 @@ function addBulkAttendanceStudents() {
 }
 
 function parseAttendanceNames(text) {
-  return String(text || "")
-    .split(/\n+/)
-    .map(line => line.replace(/\t+/g, " ").replace(/\s+/g, " ").trim())
-    .filter(line => line && !/^first\s*name|^last\s*name/i.test(line))
-    .map(line => {
-      const clean = line.replace(/^\d+[\). -]*/, "").replace(/[|,;]+/g, " ").replace(/\s+/g, " ").trim();
-      const parts = clean.split(" ").filter(Boolean);
-      if (!parts.length) return null;
-      const batchGroupIndex = parts.findIndex(part => /^[AB]$/i.test(part));
-      const batchGroup = batchGroupIndex >= 0 ? parts.splice(batchGroupIndex, 1)[0].toUpperCase() : "";
-      const dateIndex = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(part) || /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(part));
-      const admissionDate = dateIndex >= 0 ? normalizeDateInput(parts.splice(dateIndex, 1)[0]) : "";
-      const studentIdIndex = parts.findIndex(part => /^(?:id|sid|studentid)[:#-]?[a-z0-9-]+$/i.test(part) || /^[a-z]{1,6}\d{2,}[a-z0-9-]*$/i.test(part) || /^\d{3,}$/.test(part));
-      const studentId = studentIdIndex >= 0 ? parts.splice(studentIdIndex, 1)[0].replace(/^(?:id|sid|studentid)[:#-]?/i, "") : "";
-      const firstName = titleCase(parts[0]);
-      const lastToken = parts.slice(1).find(part => /^[A-Za-z]/.test(part)) || "";
-      const lastName = lastInitialOnly(lastToken);
-      return firstName ? { firstName, lastName, admissionDate, batchGroup, studentId } : null;
-    })
-    .filter(Boolean);
+  const lines = String(text || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const firstCells = splitAttendanceCells(lines[0]);
+  const headerMap = buildAttendanceHeaderMap(firstCells);
+  if (headerMap.some(Boolean) && lines.length > 1) {
+    return lines.slice(1).map(line => parseAttendanceHeaderRow(splitAttendanceCells(line), headerMap)).filter(Boolean);
+  }
+  return lines.map(parseAttendanceFreeTextLine).filter(Boolean);
+}
+
+function splitAttendanceCells(line) {
+  const value = String(line || "").trim();
+  if (value.includes("\t")) return value.split("\t").map(cell => cell.trim());
+  if (value.includes("|")) return value.split("|").map(cell => cell.trim()).filter(Boolean);
+  if (value.includes(",")) return value.split(",").map(cell => cell.trim());
+  return [value];
+}
+
+function buildAttendanceHeaderMap(cells) {
+  return cells.map(cell => attendanceHeaderField(cell));
+}
+
+function attendanceHeaderField(label) {
+  const clean = normalizeHeader(label);
+  const aliases = {
+    firstName: ["firstname", "first", "studentname", "student", "name"],
+    lastName: ["lastname", "last", "surname", "initial", "lastinitial", "lastnamefirstletter"],
+    admissionDate: ["admissiondate", "dateofadmission", "admdate", "doa", "joiningdate", "joindate"],
+    batchGroup: ["batch", "batchab", "group", "division", "batchgroup"],
+    studentId: ["studentid", "studentcode", "rollno", "rollnumber", "id", "sid", "enrollmentno", "registrationno"],
+    studentType: ["type", "studenttype", "status"]
+  };
+  const standard = Object.entries(aliases).find(([, names]) => names.includes(clean));
+  if (standard) return standard[0];
+  const custom = activeAttendanceStudentColumns().find(column => normalizeHeader(column.label) === clean || normalizeHeader(column.key.replace(/^custom:/, "")) === clean);
+  if (custom) return custom.key;
+  return "";
+}
+
+function normalizeHeader(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseAttendanceHeaderRow(cells, headerMap) {
+  const student = { customFields: {} };
+  headerMap.forEach((field, index) => {
+    if (!field) return;
+    const value = String(cells[index] || "").trim();
+    if (!value) return;
+    if (field === "firstName") student.firstName = titleCase(value.split(/\s+/)[0] || value);
+    if (field === "lastName") student.lastName = lastInitialOnly(value);
+    if (field === "admissionDate") student.admissionDate = normalizeDateInput(value);
+    if (field === "batchGroup") student.batchGroup = /^[AB]$/i.test(value) ? value.toUpperCase() : value;
+    if (field === "studentId") student.studentId = value.replace(/^(?:id|sid|studentid)[:#-]?/i, "");
+    if (field === "studentType") student.studentType = titleCase(value);
+    if (field.startsWith("custom:")) student.customFields[field.slice(7)] = value;
+  });
+  if (!student.firstName && cells.length) {
+    const parsedName = parseAttendanceFreeTextLine(cells[0]);
+    if (parsedName) {
+      student.firstName = parsedName.firstName;
+      student.lastName = student.lastName || parsedName.lastName;
+    }
+  }
+  student.lastName = lastInitialOnly(student.lastName);
+  return student.firstName ? student : null;
+}
+
+function parseAttendanceFreeTextLine(line) {
+  const clean = String(line || "").replace(/^\d+[\). -]*/, "").replace(/[|,;]+/g, " ").replace(/\s+/g, " ").trim();
+  const parts = clean.split(" ").filter(Boolean);
+  if (!parts.length || /^first\s*name|^last\s*name/i.test(clean)) return null;
+  const batchGroupIndex = parts.findIndex(part => /^[AB]$/i.test(part));
+  const batchGroup = batchGroupIndex >= 0 ? parts.splice(batchGroupIndex, 1)[0].toUpperCase() : "";
+  const dateIndex = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(part) || /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(part));
+  const admissionDate = dateIndex >= 0 ? normalizeDateInput(parts.splice(dateIndex, 1)[0]) : "";
+  const studentIdIndex = parts.findIndex(part => /^(?:id|sid|studentid)[:#-]?[a-z0-9-]+$/i.test(part) || /^[a-z]{1,6}\d{2,}[a-z0-9-]*$/i.test(part) || /^\d{3,}$/.test(part));
+  const studentId = studentIdIndex >= 0 ? parts.splice(studentIdIndex, 1)[0].replace(/^(?:id|sid|studentid)[:#-]?/i, "") : "";
+  const firstName = titleCase(parts[0]);
+  const lastToken = parts.slice(1).find(part => /^[A-Za-z]/.test(part)) || "";
+  const lastName = lastInitialOnly(lastToken);
+  return firstName ? { firstName, lastName, admissionDate, batchGroup, studentId, customFields: {} } : null;
 }
 
 function normalizeDateInput(value) {
