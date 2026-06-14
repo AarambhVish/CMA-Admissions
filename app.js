@@ -428,6 +428,7 @@ function bindEvents() {
   document.getElementById("attendanceBatchForm").addEventListener("submit", saveAttendanceBatch);
   document.getElementById("attendanceStudentForm").addEventListener("submit", saveAttendanceStudent);
   document.getElementById("attendanceSessionForm").addEventListener("submit", saveAttendanceSession);
+  document.getElementById("addAttendanceBulk")?.addEventListener("click", addBulkAttendanceStudents);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
   document.getElementById("targetPlanForm").addEventListener("submit", saveTargetPlan);
   document.getElementById("campaignForm").addEventListener("submit", saveCampaign);
@@ -3886,6 +3887,64 @@ function createAttendanceStudentFromGrid(encoded) {
   });
   save();
   renderAttendance();
+}
+
+function addBulkAttendanceStudents() {
+  const textarea = document.getElementById("attendanceBulkNames");
+  const text = textarea?.value || "";
+  const batch = selectedAttendanceBatch();
+  if (!batch) return alert("Select one attendance batch first, then paste student names.");
+  const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
+  if (!canManageAttendanceBranch(branch)) return alert("You can add attendance students only for your branch.");
+  const students = parseAttendanceNames(text);
+  if (!students.length) return alert("Paste at least one student name.");
+  let added = 0;
+  let skipped = 0;
+  students.forEach(student => {
+    const exists = state.attendanceStudents.some(item =>
+      !item.archivedAt &&
+      item.batch === batch &&
+      item.branch === branch &&
+      item.firstName.toLowerCase() === student.firstName.toLowerCase() &&
+      (item.lastName || item.lastInitial || "").toLowerCase() === student.lastName.toLowerCase()
+    );
+    if (exists) {
+      skipped++;
+      return;
+    }
+    state.attendanceStudents.push({
+      id: id(),
+      firstName: student.firstName,
+      lastName: student.lastName,
+      lastInitial: student.lastName.slice(0, 1).toUpperCase(),
+      batch,
+      branch,
+      studentType: "Demo",
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser?.name || ""
+    });
+    added++;
+  });
+  save();
+  if (textarea) textarea.value = "";
+  renderAttendance();
+  alert(`Added ${added} student${added === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}.` : ""}`);
+}
+
+function parseAttendanceNames(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .map(line => line.replace(/\t+/g, " ").replace(/\s+/g, " ").trim())
+    .filter(line => line && !/^first\s*name|^last\s*name/i.test(line))
+    .map(line => {
+      const clean = line.replace(/^\d+[\). -]*/, "").replace(/[|,;]+/g, " ").replace(/\s+/g, " ").trim();
+      const parts = clean.split(" ").filter(Boolean);
+      if (!parts.length) return null;
+      const firstName = titleCase(parts[0]);
+      const lastName = titleCase(parts.slice(1).join(" "));
+      return firstName ? { firstName, lastName } : null;
+    })
+    .filter(Boolean);
 }
 
 function assignLeadBranch(leadId) {
