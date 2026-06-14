@@ -763,9 +763,9 @@ function renderAttendanceFilters() {
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<button type="button" data-attendance-week="prev">Previous Week</button>`,
-    `<label class="attendance-start-label">Friday From <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}" readonly tabindex="-1"></label>`,
-    `<button type="button" data-attendance-week="next">Next Week</button>`,
+    `<button class="attendance-week-btn" type="button" data-attendance-week="prev">&lt; Previous Block</button>`,
+    `<label class="attendance-start-label">Block Date <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}" readonly tabindex="-1"></label>`,
+    `<button class="attendance-week-btn" type="button" data-attendance-week="next">Next Block &gt;</button>`,
     `<select id="attendance-status-filter">
       <option value="">All P / A</option>
       <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>

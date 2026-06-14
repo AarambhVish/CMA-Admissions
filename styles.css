@@ -360,6 +360,13 @@ td.actions { white-space: nowrap; }
   font-weight: 700;
   color: var(--text);
 }
+.attendance-week-btn {
+  min-height: 42px;
+  border-color: #2563eb;
+  color: #1d4ed8;
+  font-weight: 800;
+  background: #eff6ff;
+}
 .attendance-entry-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
