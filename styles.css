@@ -384,7 +384,7 @@ td.actions { white-space: nowrap; }
   margin-top: 14px;
 }
 .attendance-table {
-  min-width: 970px;
+  min-width: 1160px;
   table-layout: fixed;
   border-color: #111827;
 }
@@ -422,6 +422,32 @@ td.actions { white-space: nowrap; }
   background: #f8fafc;
   z-index: 4;
 }
+.attendance-table .admission-date-col {
+  min-width: 108px;
+  width: 108px;
+  text-align: center;
+  position: sticky;
+  left: 168px;
+  z-index: 3;
+  background: var(--panel);
+}
+.attendance-table th.admission-date-col {
+  background: #f8fafc;
+  z-index: 4;
+}
+.attendance-table .batch-group-col {
+  min-width: 64px;
+  width: 64px;
+  text-align: center;
+  position: sticky;
+  left: 276px;
+  z-index: 3;
+  background: var(--panel);
+}
+.attendance-table th.batch-group-col {
+  background: #f8fafc;
+  z-index: 4;
+}
 .attendance-table .lecture-col {
   min-width: 116px;
   width: 116px;
@@ -431,8 +457,8 @@ td.actions { white-space: nowrap; }
   background: #fff;
 }
 .attendance-batch-head {
-  min-width: 168px;
-  width: 168px;
+  min-width: 340px;
+  width: 340px;
   text-align: center;
   font-size: 13px;
   line-height: 1.35;

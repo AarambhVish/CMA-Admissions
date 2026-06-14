@@ -906,11 +906,14 @@ function attendanceRoster() {
     .map(lead => {
       const firstName = lead.firstName || firstNameOf(displayLeadName(lead));
       const lastName = lead.lastName || displayLeadName(lead).split(/\s+/).slice(1).join(" ");
+      const admission = state.admissions.find(item => item.leadId === lead.id);
       return {
         id: `lead-${lead.id}`,
         firstName,
         lastName,
         lastInitial: (lastName || "").slice(0, 1).toUpperCase(),
+        admissionDate: admission?.admissionDate || "",
+        batchGroup: "",
         batch: lead.batch || "Unassigned",
         branch: lead.branch || "Unassigned",
         studentType: lead.status === "Converted / Admitted" ? "Admitted" : "Demo",
@@ -1028,18 +1031,22 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   <table class="attendance-table">
     <thead>
       <tr>
-        <th class="attendance-batch-head" colspan="2">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
+        <th class="attendance-batch-head" colspan="4">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
         ${subjectHeaders}
       </tr>
       <tr>
         <th class="student-col">First Name</th>
         <th class="initial-col">Last</th>
+        <th class="admission-date-col">Admission Date</th>
+        <th class="batch-group-col">Batch</th>
         ${dateHeaders}
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
-      <td class="student-col">${attendanceNameCell(student, "firstName")}</td>
-      <td class="initial-col">${attendanceNameCell(student, "lastName")}</td>
+      <td class="student-col">${attendanceStudentFieldCell(student, "firstName")}</td>
+      <td class="initial-col">${attendanceStudentFieldCell(student, "lastName")}</td>
+      <td class="admission-date-col">${attendanceStudentFieldCell(student, "admissionDate")}</td>
+      <td class="batch-group-col">${attendanceStudentFieldCell(student, "batchGroup")}</td>
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>
@@ -1050,14 +1057,25 @@ function renderManualAttendanceRow(index, sessions, batch, branch) {
   return `<tr>
     <td class="student-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "firstName", batch, branch })}" placeholder="<Add Manually>"></td>
     <td class="initial-col"><input class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "lastName", batch, branch })}" placeholder="<Add>"></td>
+    <td class="admission-date-col"><input class="attendance-name-input" type="date" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "admissionDate", batch, branch })}"></td>
+    <td class="batch-group-col"><select class="attendance-name-input" data-attendance-new-student="${attendancePayload({ rowIndex: index, field: "batchGroup", batch, branch })}"><option></option><option>A</option><option>B</option></select></td>
     ${sessions.map(() => `<td class="attendance-cell empty-lecture">${disabledAttendanceSelect()}</td>`).join("")}
   </tr>`;
 }
 
-function attendanceNameCell(student, field) {
-  const value = field === "lastName" ? (student.lastName || student.lastInitial || "") : (student.firstName || "");
+function attendanceStudentFieldCell(student, field) {
+  const value = attendanceStudentFieldValue(student, field);
   if (student.source !== "Manual") return escapeHtml(value || "");
+  if (field === "admissionDate") return `<input class="attendance-name-input" type="date" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
+  if (field === "batchGroup") return `<select class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}"><option></option><option ${value === "A" ? "selected" : ""}>A</option><option ${value === "B" ? "selected" : ""}>B</option></select>`;
   return `<input class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
+}
+
+function attendanceStudentFieldValue(student, field) {
+  if (field === "lastName") return student.lastName || student.lastInitial || "";
+  if (field === "admissionDate") return student.admissionDate || "";
+  if (field === "batchGroup") return student.batchGroup || "";
+  return student.firstName || "";
 }
 
 function attendanceCell(student, session) {
@@ -3042,6 +3060,8 @@ function saveAttendanceStudent(e) {
     firstName,
     lastName,
     lastInitial,
+    admissionDate: data.admissionDate || "",
+    batchGroup: data.batchGroup || "",
     batch: data.batch || "Unassigned",
     branch: data.branch || "Unassigned",
     studentType: data.studentType || "Demo",
@@ -3827,6 +3847,8 @@ function routeAttendanceTextEdits(e) {
     student.lastName = titleCase(input.value || "");
     student.lastInitial = student.lastName.slice(0, 1).toUpperCase();
   }
+  if (field === "admissionDate") student.admissionDate = input.value || "";
+  if (field === "batchGroup") student.batchGroup = input.value || "";
   save();
   renderAttendance();
 }
@@ -3861,6 +3883,8 @@ function createAttendanceStudentFromGrid(encoded) {
   });
   const first = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "firstName")?.value.trim();
   const last = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "lastName")?.value.trim();
+  const admissionDate = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "admissionDate")?.value || "";
+  const batchGroup = rowInputs.find(input => parseAttendancePayload(input.dataset.attendanceNewStudent).field === "batchGroup")?.value || "";
   if (!first || !last) return;
   const batch = payload.batch || selectedAttendanceBatch();
   if (!batch) return alert("Select attendance batch first.");
@@ -3879,6 +3903,8 @@ function createAttendanceStudentFromGrid(encoded) {
     firstName: titleCase(first),
     lastName: titleCase(last),
     lastInitial: titleCase(last).slice(0, 1).toUpperCase(),
+    admissionDate,
+    batchGroup,
     batch,
     branch,
     studentType: "Demo",
@@ -3917,6 +3943,8 @@ function addBulkAttendanceStudents() {
       firstName: student.firstName,
       lastName: student.lastName,
       lastInitial: student.lastName.slice(0, 1).toUpperCase(),
+      admissionDate: student.admissionDate || "",
+      batchGroup: student.batchGroup || "",
       batch,
       branch,
       studentType: "Demo",
@@ -3940,11 +3968,24 @@ function parseAttendanceNames(text) {
       const clean = line.replace(/^\d+[\). -]*/, "").replace(/[|,;]+/g, " ").replace(/\s+/g, " ").trim();
       const parts = clean.split(" ").filter(Boolean);
       if (!parts.length) return null;
+      const batchGroupIndex = parts.findIndex(part => /^[AB]$/i.test(part));
+      const batchGroup = batchGroupIndex >= 0 ? parts.splice(batchGroupIndex, 1)[0].toUpperCase() : "";
+      const dateIndex = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(part));
+      const admissionDate = dateIndex >= 0 ? normalizeDateInput(parts.splice(dateIndex, 1)[0]) : "";
       const firstName = titleCase(parts[0]);
       const lastName = titleCase(parts.slice(1).join(" "));
-      return firstName ? { firstName, lastName } : null;
+      return firstName ? { firstName, lastName, admissionDate, batchGroup } : null;
     })
     .filter(Boolean);
+}
+
+function normalizeDateInput(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const match = String(value || "").match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (!match) return "";
+  const [, day, month, year] = match;
+  const fullYear = year.length === 2 ? `20${year}` : year;
+  return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
 
 function assignLeadBranch(leadId) {
