@@ -752,7 +752,7 @@ function renderAttendanceFilters() {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
-  const currentStartDate = document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(currentBatch);
+  const currentStartDate = fridayOfWeek(document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(currentBatch));
   const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
@@ -763,7 +763,9 @@ function renderAttendanceFilters() {
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<label class="attendance-start-label">From Date <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`,
+    `<button type="button" data-attendance-week="prev">Previous Week</button>`,
+    `<label class="attendance-start-label">Friday From <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}" readonly tabindex="-1"></label>`,
+    `<button type="button" data-attendance-week="next">Next Week</button>`,
     `<select id="attendance-status-filter">
       <option value="">All P / A</option>
       <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>
@@ -781,12 +783,30 @@ function selectedAttendanceStatusFilter() {
 }
 
 function selectedAttendanceStartDate(batch = selectedAttendanceBatch()) {
-  return document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch);
+  return fridayOfWeek(document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch));
 }
 
 function attendanceDefaultStartDate(batch = "") {
   const saved = attendanceSessionsForBatch(batch, attendanceBatchLocation(batch));
-  return saved[0]?.date || todayDate();
+  return fridayOfWeek(saved[0]?.date || todayDate());
+}
+
+function fridayOfWeek(value) {
+  const date = new Date(`${value || todayDate()}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return todayDate();
+  const day = date.getDay();
+  const diff = (day - 5 + 7) % 7;
+  date.setDate(date.getDate() - diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftAttendanceWeek(direction) {
+  const input = document.getElementById("attendance-start-date");
+  if (!input) return;
+  const current = new Date(`${selectedAttendanceStartDate()}T00:00:00`);
+  current.setDate(current.getDate() + (direction === "next" ? 7 : -7));
+  input.value = current.toISOString().slice(0, 10);
+  renderAttendance();
 }
 
 function attendanceStudentMatchesStatus(student, sessions, statusFilter) {
@@ -923,9 +943,7 @@ function attendanceSessionDateTitle(session) {
   const date = new Date(`${session.date}T00:00:00`);
   const day = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { weekday: "short" });
   const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }).replaceAll(" ", "-");
-  const payload = attendancePayload({ sessionId: session.id, field: "date", date: session.date, batch: session.batch, branch: session.branch });
-  return `<input type="date" class="attendance-date-input" value="${escapeAttr(session.date || "")}" data-attendance-session-field="${payload}">
-    <span class="attendance-date-label">${escapeHtml(shortDate)} ${escapeHtml(day)}</span>`;
+  return `<span class="attendance-date-label">${escapeHtml(shortDate)} ${escapeHtml(day)}</span>`;
 }
 
 function attendanceRecordKey(studentId, sessionId) {
@@ -3637,6 +3655,7 @@ function routeActions(e) {
   if (!button) return;
   if (button.dataset.edit) openLeadForm(state.leads.find(l => l.id === button.dataset.edit));
   if (button.dataset.dashboardMetric) openDashboardMetric(button.dataset.dashboardMetric);
+  if (button.dataset.attendanceWeek) shiftAttendanceWeek(button.dataset.attendanceWeek);
   if (button.dataset.followup) openFollowup(button.dataset.followup);
   if (button.dataset.admit) openAdmission(button.dataset.admit);
   if (button.dataset.wa) sendWhatsApp(button.dataset.wa);

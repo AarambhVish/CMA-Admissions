@@ -502,21 +502,8 @@ td.actions { white-space: nowrap; }
 .attendance-header-select + .attendance-header-select {
   margin-top: 2px;
 }
-.attendance-date-input {
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid #111827;
-  border-radius: 0;
-  background: #fff;
-  padding: 2px;
-  font-size: 11px;
-  font-weight: 700;
-  text-align: center;
-  cursor: pointer;
-}
 .attendance-date-label {
   display: block;
-  margin-top: 2px;
   font-size: 11px;
   font-weight: 800;
 }
