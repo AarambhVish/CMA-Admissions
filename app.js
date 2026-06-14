@@ -1244,6 +1244,7 @@ function renderSettings() {
         <label>Allowed Locations<select name="branchAccess" multiple size="5">${masters.branches.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select></label>
         <div id="settingsUserTabAccess" class="access-list"></div>
         <button class="primary">Save Admin</button>
+        <button type="button" data-clear-user-form="settingsUserForm">Add New Admin</button>
       </form>
       <div id="settingsUserList" class="table-wrap"></div>
     </section>
@@ -3240,7 +3241,9 @@ async function saveUser(e) {
   }
   const formData = new FormData(e.target);
   const data = Object.fromEntries(formData.entries());
-  const existingUser = data.id ? state.users.find(user => user.id === data.id) : null;
+  const editingId = e.target.dataset.editingUser || "";
+  if (data.id && data.id !== editingId) data.id = "";
+  const existingUser = data.id && editingId ? state.users.find(user => user.id === data.id) : null;
   data.branchAccess = formData.getAll("branchAccess").filter(Boolean);
   if (data.branch && data.branch !== "Unassigned" && !data.branchAccess.includes(data.branch)) {
     data.branchAccess.unshift(data.branch);
@@ -3263,11 +3266,9 @@ async function saveUser(e) {
     state.users.push({ id: id(), ...data });
   }
   save();
-  e.target.reset();
+  clearUserForm(e.target.id);
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
-  renderUserTabAccess("userTabAccess");
-  renderUserTabAccess("settingsUserTabAccess");
   render();
 }
 
@@ -3277,6 +3278,7 @@ function editUser(userId) {
   if (!user || !form) return;
   activeTab = "users";
   render();
+  form.dataset.editingUser = user.id;
   document.getElementById("userFormTitle").textContent = "Edit User";
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
@@ -3290,12 +3292,30 @@ function editSettingsUser(userId) {
   const user = state.users.find(u => u.id === userId);
   const form = document.getElementById("settingsUserForm");
   if (!user || !form) return;
+  form.dataset.editingUser = user.id;
   Object.entries(user).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
   setMultiSelectValues(form.elements.branchAccess, userBranchList(user));
   renderUserTabAccess("settingsUserTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function clearUserForm(formId) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.reset();
+  delete form.dataset.editingUser;
+  if (form.elements.id) form.elements.id.value = "";
+  setMultiSelectValues(form.elements.branchAccess, []);
+  if (formId === "userForm") {
+    const title = document.getElementById("userFormTitle");
+    if (title) title.textContent = "Add User";
+    renderUserTabAccess("userTabAccess");
+  }
+  if (formId === "settingsUserForm") {
+    renderUserTabAccess("settingsUserTabAccess");
+  }
 }
 
 function setMultiSelectValues(select, values = []) {
@@ -3664,6 +3684,7 @@ function routeActions(e) {
   if (button.dataset.attendanceMark) updateAttendanceStatus(button.dataset.attendanceMark, button.dataset.mark);
   if (button.dataset.restoreLead) restoreLead(button.dataset.restoreLead);
   if (button.dataset.permanentDelete) permanentlyDeleteLead(button.dataset.permanentDelete);
+  if (button.dataset.clearUserForm) clearUserForm(button.dataset.clearUserForm);
   if (button.dataset.editUser) editUser(button.dataset.editUser);
   if (button.dataset.editSettingsUser) editSettingsUser(button.dataset.editSettingsUser);
   if (button.dataset.applyTags) applyLineTags(Number(button.dataset.applyTags));
