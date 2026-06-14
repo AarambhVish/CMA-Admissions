@@ -1102,7 +1102,7 @@ function manualAttendanceFieldControl(index, column, batch, branch) {
 function attendanceStudentFieldCell(student, field) {
   const value = attendanceStudentFieldValue(student, field);
   if (student.source !== "Manual") return escapeHtml(value || "");
-  if (field === "admissionDate") return `<input class="attendance-name-input" type="date" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
+  if (field === "admissionDate") return `<input class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(formatAttendanceDate(value))}" placeholder="DD-MMM-YYYY">`;
   if (field === "batchGroup") return `<select class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}"><option></option><option ${value === "A" ? "selected" : ""}>A</option><option ${value === "B" ? "selected" : ""}>B</option></select>`;
   if (field === "studentType") return `<select class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}"><option ${value === "Demo" ? "selected" : ""}>Demo</option><option ${value === "Admitted" ? "selected" : ""}>Admitted</option></select>`;
   return `<input class="attendance-name-input" data-attendance-student-name="${escapeAttr(student.id)}:${field}" value="${escapeAttr(value || "")}">`;
@@ -1118,12 +1118,23 @@ function attendanceStudentFieldValue(student, field) {
   return student.firstName || "";
 }
 
+function formatAttendanceDate(value) {
+  const normalized = normalizeDateInput(value);
+  if (!normalized) return value || "";
+  const [year, month, day] = normalized.split("-");
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${day}-${monthNames[Number(month) - 1] || month}-${year}`;
+}
+
 function lastInitialOnly(value) {
   const match = String(value || "").trim().match(/[A-Za-z]/);
   return match ? match[0].toUpperCase() : "";
 }
 
 function attendanceCell(student, session) {
+  if (isBeforeStudentAdmission(student, session)) {
+    return `<td class="attendance-cell not-applicable" title="Student was not in batch on this date">NA</td>`;
+  }
   const record = attendanceRecord(student.id, session.id);
   const status = record.present === false ? "absent" : "present";
   const selected = record.present === false ? "absent" : "present";
@@ -1140,6 +1151,19 @@ function attendanceCell(student, session) {
   </td>`;
 }
 
+function isBeforeStudentAdmission(student, session) {
+  if (!student?.admissionDate || !session?.date) return false;
+  const admissionDate = attendanceDateValue(student.admissionDate);
+  const lectureDate = attendanceDateValue(session.date);
+  return Boolean(admissionDate && lectureDate && lectureDate < admissionDate);
+}
+
+function attendanceDateValue(value) {
+  const normalized = normalizeDateInput(value);
+  if (!normalized) return "";
+  return normalized.replace(/-/g, "");
+}
+
 function disabledAttendanceSelect() {
   return `<select class="attendance-status-select" disabled title="Add student name first">
     <option>P / A</option>
@@ -1153,6 +1177,7 @@ function renderAttendanceReport(students, sessions) {
   let presentCount = 0;
   sessions.forEach(session => {
     students.forEach(student => {
+      if (isBeforeStudentAdmission(student, session)) return;
       const record = attendanceRecord(student.id, session.id);
       if (record.present === false) absentRows.push({ student, session, remark: record.remark || "No remark" });
       else if (record.present === true) presentCount++;
@@ -4008,7 +4033,7 @@ function routeAttendanceTextEdits(e) {
     student.lastName = lastInitialOnly(input.value || "");
     student.lastInitial = student.lastName.slice(0, 1).toUpperCase();
   }
-  if (field === "admissionDate") student.admissionDate = input.value || "";
+  if (field === "admissionDate") student.admissionDate = normalizeDateInput(input.value) || input.value || "";
   if (field === "batchGroup") student.batchGroup = input.value || "";
   if (field === "studentId") student.studentId = input.value || "";
   if (field === "studentType") student.studentType = input.value || "Demo";

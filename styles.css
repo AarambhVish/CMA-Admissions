@@ -597,6 +597,12 @@ td.actions { white-space: nowrap; }
   border-color: #fca5a5;
   color: #b91c1c;
 }
+.attendance-cell.not-applicable {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
 .pill { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 12px; }
 .danger { color: var(--red); }
 .danger-btn { color: var(--red); border-color: #fecaca; }
