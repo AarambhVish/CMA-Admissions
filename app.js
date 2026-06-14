@@ -287,12 +287,16 @@ function updateAuthView() {
   if (passwordButton) passwordButton.disabled = !currentUser;
 }
 
+function normalizedRole(user = currentUser) {
+  return String(user?.role || "").trim().toLowerCase();
+}
+
 function isSuperAdmin() {
-  return currentUser?.role === "Super Admin";
+  return normalizedRole() === "super admin";
 }
 
 function isLeadManager() {
-  return currentUser?.role === "Lead Manager";
+  return normalizedRole() === "lead manager";
 }
 
 function canActOnLead(lead) {
@@ -313,13 +317,17 @@ function canManageAllAttendance() {
   return isSuperAdmin() || isLeadManager();
 }
 
+function canSuperAdminEditAttendance() {
+  return isSuperAdmin();
+}
+
 function attendanceAdminBranch() {
   return currentUser?.branch && currentUser.branch !== "Unassigned" ? currentUser.branch : "";
 }
 
 function canManageAttendanceBranch(branch) {
   if (!currentUser) return false;
-  if (canManageAllAttendance()) return true;
+  if (canSuperAdminEditAttendance() || isLeadManager()) return true;
   const ownBranch = attendanceAdminBranch();
   return Boolean(ownBranch && branch === ownBranch);
 }
@@ -508,7 +516,7 @@ function canSeeTab(tabKey, user = currentUser) {
 }
 
 function isSuperAdminUser(user) {
-  return user?.role === "Super Admin";
+  return normalizedRole(user) === "super admin";
 }
 
 function filteredLeads(prefix = "lead") {
