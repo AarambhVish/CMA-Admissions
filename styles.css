@@ -437,14 +437,21 @@ td.actions { white-space: nowrap; }
   min-width: 66px;
   padding: 3px 6px;
   border-radius: 4px;
-  border-color: #cbd5e1;
+  border: 1px solid #94a3b8;
   font-weight: 800;
   text-align: center;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+}
+.attendance-status-select.active-attendance-control {
+  box-shadow: inset 0 0 0 1px #e2e8f0;
 }
 .attendance-status-select:disabled {
   opacity: 1;
   background: #f8fafc;
   color: #64748b;
+  cursor: not-allowed;
 }
 .attendance-reason {
   margin-top: 4px;
@@ -474,6 +481,24 @@ td.actions { white-space: nowrap; }
 }
 .attendance-header-select + .attendance-header-select {
   margin-top: 2px;
+}
+.attendance-date-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #111827;
+  border-radius: 0;
+  background: #fff;
+  padding: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+.attendance-date-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 800;
 }
 .attendance-name-input:focus {
   outline: 2px solid var(--primary);

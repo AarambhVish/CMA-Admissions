@@ -893,7 +893,9 @@ function attendanceSessionDateTitle(session) {
   const date = new Date(`${session.date}T00:00:00`);
   const day = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { weekday: "short" });
   const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }).replaceAll(" ", "-");
-  return `${escapeHtml(shortDate)} ${escapeHtml(day)}`.trim();
+  const payload = attendancePayload({ sessionId: session.id, field: "date", date: session.date, batch: session.batch, branch: session.branch });
+  return `<input type="date" class="attendance-date-input" value="${escapeAttr(session.date || "")}" data-attendance-session-field="${payload}">
+    <span class="attendance-date-label">${escapeHtml(shortDate)} ${escapeHtml(day)}</span>`;
 }
 
 function attendanceRecordKey(studentId, sessionId) {
@@ -1015,7 +1017,7 @@ function attendanceCell(student, session) {
   const selected = record.present === false ? "absent" : "present";
   const markKey = attendancePayload({ studentId: student.id, sessionId: session.id, batch: session.batch, branch: session.branch, date: session.date });
   return `<td class="attendance-cell ${status}">
-    <select class="attendance-status-select" data-attendance-status="${markKey}">
+    <select class="attendance-status-select active-attendance-control" data-attendance-status="${markKey}">
       <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
       <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
     </select>
@@ -3066,7 +3068,8 @@ function canManageAttendanceCell(studentId, sessionId) {
   if (canManageAllAttendance()) return true;
   const student = attendanceRoster().find(item => item.id === studentId);
   const session = state.attendanceSessions.find(item => item.id === sessionId);
-  const branch = student?.branch || session?.branch || attendanceAdminBranch();
+  const draft = draftSessionFromId(sessionId);
+  const branch = student?.branch || session?.branch || draft?.branch || attendanceBatchLocation(draft?.batch) || attendanceAdminBranch();
   return canManageAttendanceBranch(branch);
 }
 
