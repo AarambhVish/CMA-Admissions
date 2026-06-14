@@ -752,6 +752,7 @@ function renderAttendanceFilters() {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
+  const currentStartDate = document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(currentBatch);
   const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
@@ -762,6 +763,7 @@ function renderAttendanceFilters() {
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
+    `<label class="attendance-start-label">From Date <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`,
     `<select id="attendance-status-filter">
       <option value="">All P / A</option>
       <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>
@@ -776,6 +778,15 @@ function renderAttendanceFilters() {
 
 function selectedAttendanceStatusFilter() {
   return document.getElementById("attendance-status-filter")?.value || "";
+}
+
+function selectedAttendanceStartDate(batch = selectedAttendanceBatch()) {
+  return document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch);
+}
+
+function attendanceDefaultStartDate(batch = "") {
+  const saved = attendanceSessionsForBatch(batch, attendanceBatchLocation(batch));
+  return saved[0]?.date || todayDate();
 }
 
 function attendanceStudentMatchesStatus(student, sessions, statusFilter) {
@@ -848,7 +859,7 @@ function attendanceSessionsForBatch(batch, branch = "") {
 
 function attendanceWeekSessions(batch, branch = "") {
   const saved = attendanceSessionsForBatch(batch, branch);
-  const start = saved[0]?.date || todayDate();
+  const start = selectedAttendanceStartDate(batch);
   const startDate = new Date(`${start}T00:00:00`);
   return Array.from({ length: 7 }, (_, index) => {
     const d = new Date(startDate);
@@ -905,9 +916,7 @@ function attendanceSessionTitle(session) {
   return `<select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "subject", date: session.date, batch: session.batch, branch: session.branch })}">
       ${papers.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
     </select>
-    <select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">
-      ${professors.map(name => `<option ${name === prof ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
-    </select>`;
+    <input class="attendance-header-select" list="attendanceProfessorList" value="${escapeAttr(prof)}" placeholder="Professor" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">`;
 }
 
 function attendanceSessionDateTitle(session) {
@@ -983,7 +992,7 @@ function remapAttendanceSessionId(oldId, newId) {
 function renderAttendanceGrid(sections) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
-  target.innerHTML = sections.map(section => renderAttendanceTable(section)).join("");
+  target.innerHTML = `<datalist id="attendanceProfessorList">${masters.professors.map(name => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>${sections.map(section => renderAttendanceTable(section)).join("")}`;
 }
 
 function renderAttendanceTable({ batch, branch, students, sessions }) {
@@ -3796,7 +3805,8 @@ function updateAttendanceSessionField(encoded, value) {
     subject: current.subject || attendancePaperOptions(batch)[0] || "P1",
     prof: current.prof || masters.professors[0] || ""
   };
-  updates[field] = value;
+  updates[field] = field === "prof" ? titleCase(value || "") : value;
+  if (field === "prof" && updates[field]) addUnique(masters.professors, updates[field]);
   ensureAttendanceSession(sessionId, updates);
   save();
   renderAttendance();
