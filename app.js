@@ -757,6 +757,9 @@ function renderAttendance() {
   const selectedBatch = selectedAttendanceBatch();
   const selectedBranch = selectedBatch ? document.getElementById("attendance-branch")?.value || "" : "";
   const statusFilter = selectedAttendanceStatusFilter();
+  const batchGroupFilter = selectedAttendanceBatchGroupFilter();
+  const sortField = selectedAttendanceSortField();
+  const sortDirection = selectedAttendanceSortDirection();
   const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
   const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
     if (!selectedBranch || selectedBatch) return true;
@@ -764,10 +767,11 @@ function renderAttendance() {
   }).map(batch => {
     const branch = attendanceBatchLocation(batch) || selectedBranch || "";
     const sessions = attendanceWeekSessions(batch, branch);
-    const students = attendanceRoster()
+    const students = sortAttendanceStudents(attendanceRoster()
       .filter(student => !batch || student.batch === batch)
       .filter(student => !branch || student.branch === branch)
-      .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter));
+      .filter(student => !batchGroupFilter || student.batchGroup === batchGroupFilter)
+      .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter)), sortField, sortDirection);
     return { batch, branch, students, sessions };
   });
   renderAttendanceGrid(sections);
@@ -779,6 +783,9 @@ function renderAttendanceFilters() {
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
   const currentStartDate = fridayOfWeek(document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(currentBatch));
   const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
+  const currentBatchGroup = document.getElementById("attendance-batch-group-filter")?.value || "";
+  const currentSort = document.getElementById("attendance-sort")?.value || "firstName";
+  const currentSortDir = document.getElementById("attendance-sort-dir")?.value || "asc";
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
@@ -788,6 +795,18 @@ function renderAttendanceFilters() {
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
+    `<select id="attendance-batch-group-filter">
+      <option value="">All Batch A/B</option>
+      <option value="A" ${currentBatchGroup === "A" ? "selected" : ""}>Batch A</option>
+      <option value="B" ${currentBatchGroup === "B" ? "selected" : ""}>Batch B</option>
+    </select>`,
+    `<select id="attendance-sort">
+      ${attendanceSortOptions().map(option => `<option value="${escapeAttr(option.key)}" ${option.key === currentSort ? "selected" : ""}>Sort: ${escapeHtml(option.label)}</option>`).join("")}
+    </select>`,
+    `<select id="attendance-sort-dir">
+      <option value="asc" ${currentSortDir === "asc" ? "selected" : ""}>A to Z / Old First</option>
+      <option value="desc" ${currentSortDir === "desc" ? "selected" : ""}>Z to A / New First</option>
+    </select>`,
     `<button class="attendance-week-btn" type="button" data-attendance-week="prev">&lt; Previous Block</button>`,
     `<label class="attendance-start-label">Block Date <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}" readonly tabindex="-1"></label>`,
     `<button class="attendance-week-btn" type="button" data-attendance-week="next">Next Block &gt;</button>`,
@@ -805,6 +824,47 @@ function renderAttendanceFilters() {
 
 function selectedAttendanceStatusFilter() {
   return document.getElementById("attendance-status-filter")?.value || "";
+}
+
+function selectedAttendanceBatchGroupFilter() {
+  return document.getElementById("attendance-batch-group-filter")?.value || "";
+}
+
+function selectedAttendanceSortField() {
+  return document.getElementById("attendance-sort")?.value || "firstName";
+}
+
+function selectedAttendanceSortDirection() {
+  return document.getElementById("attendance-sort-dir")?.value || "asc";
+}
+
+function attendanceSortOptions() {
+  const options = activeAttendanceStudentColumns().map(column => ({ key: column.key, label: column.label }));
+  const required = [
+    { key: "firstName", label: "First Name" },
+    { key: "lastName", label: "Last Name" },
+    { key: "admissionDate", label: "Admission Date" },
+    { key: "batchGroup", label: "Batch A/B" },
+    { key: "studentId", label: "Student ID" }
+  ];
+  required.forEach(option => {
+    if (!options.some(item => item.key === option.key)) options.push(option);
+  });
+  return options;
+}
+
+function sortAttendanceStudents(students, field, direction) {
+  const factor = direction === "desc" ? -1 : 1;
+  return [...students].sort((a, b) => {
+    const left = attendanceSortValue(a, field);
+    const right = attendanceSortValue(b, field);
+    return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }) * factor;
+  });
+}
+
+function attendanceSortValue(student, field) {
+  if (field === "admissionDate") return attendanceDateValue(student.admissionDate) || "99999999";
+  return String(attendanceStudentFieldValue(student, field) || "").trim();
 }
 
 function selectedAttendanceStartDate(batch = selectedAttendanceBatch()) {
