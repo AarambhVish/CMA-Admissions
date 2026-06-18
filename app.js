@@ -3100,7 +3100,6 @@ function deletePaperFaculty(payload) {
   const list = masters.paperFaculty?.[courseName]?.[paper] || [];
   const name = list[index];
   if (!name) return;
-  if (!confirm(`Remove "${name}" from ${courseName} ${paper}? Existing attendance records will keep saved text.`)) return;
   list.splice(index, 1);
   save();
   render();
