@@ -18,6 +18,12 @@ const tabs = [
   ["settings", "Master Settings"]
 ];
 
+const defaultRoleTabAccess = {
+  "Super Admin": tabs.map(([key]) => key),
+  "Lead Manager": ["dashboard", "leads", "archive", "followups", "admissions", "attendance", "targets", "campaigns", "whatsapp", "reports", "users"],
+  "Counsellor / Admin": ["dashboard", "leads", "followups", "admissions", "attendance", "whatsapp"]
+};
+
 const defaultLeadColumns = [
   { key: "createdAt", label: "Date Added" },
   { key: "leadAge", label: "Age of Lead" },
@@ -118,6 +124,7 @@ const seed = {
   targets: [],
   leadColumns: structuredClone(defaultLeadColumns),
   attendanceStudentColumns: structuredClone(defaultAttendanceStudentColumns),
+  roleTabAccess: structuredClone(defaultRoleTabAccess),
   customAttendanceFields: [],
   customLeadFields: [],
   masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
@@ -181,6 +188,7 @@ function normalizeStateDefaults(data) {
   };
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
   data.attendanceStudentColumns = Array.isArray(data.attendanceStudentColumns) && data.attendanceStudentColumns.length ? data.attendanceStudentColumns : structuredClone(defaultAttendanceStudentColumns);
+  data.roleTabAccess = normalizeRoleTabAccess(data.roleTabAccess, data.masters.roles);
   data.customAttendanceFields = Array.isArray(data.customAttendanceFields) ? data.customAttendanceFields : [];
   data.customLeadFields = Array.isArray(data.customLeadFields) ? data.customLeadFields : [];
   data.leads.forEach(lead => {
@@ -200,11 +208,24 @@ function normalizeStateDefaults(data) {
 function normalizeUserTabAccess(tabAccess) {
   const allTabs = tabs.map(([key]) => key);
   if (!Array.isArray(tabAccess) || !tabAccess.length) return allTabs;
-  const valid = tabAccess.filter(key => allTabs.includes(key));
-  allTabs.forEach(key => {
-    if (!valid.includes(key)) valid.push(key);
+  return tabAccess.filter(key => allTabs.includes(key));
+}
+
+function normalizeRoleTabAccess(roleAccess = {}, roleNames = null) {
+  const normalized = {};
+  mastersRoleNames(roleAccess, roleNames).forEach(role => {
+    normalized[role] = normalizeUserTabAccess(roleAccess?.[role] || defaultRoleTabAccess[role] || tabs.map(([key]) => key));
   });
-  return valid;
+  return normalized;
+}
+
+function mastersRoleNames(roleAccess = {}, roleNames = null) {
+  return [...new Set([...(roleNames || masters?.roles || defaultMasters.roles), ...Object.keys(defaultRoleTabAccess), ...Object.keys(roleAccess || {})])].filter(Boolean);
+}
+
+function roleTabDefaults(role) {
+  const normalized = normalizeRoleTabAccess(state.roleTabAccess || {});
+  return normalizeUserTabAccess(normalized[role] || defaultRoleTabAccess[role] || tabs.map(([key]) => key));
 }
 
 function stripSensitiveData(data) {
@@ -487,9 +508,7 @@ function bindEvents() {
   document.getElementById("followupForm").addEventListener("submit", saveFollowup);
   document.getElementById("admissionForm").addEventListener("submit", saveAdmission);
   document.getElementById("attendanceBatchForm").addEventListener("submit", saveAttendanceBatch);
-  document.getElementById("attendanceStudentForm").addEventListener("submit", saveAttendanceStudent);
   document.getElementById("attendanceSessionForm").addEventListener("submit", saveAttendanceSession);
-  document.getElementById("addAttendanceBulk")?.addEventListener("click", addBulkAttendanceStudents);
   document.getElementById("importPlannerTimetable")?.addEventListener("click", importPlannerTimetableForAttendance);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
   document.getElementById("targetPlanForm").addEventListener("submit", saveTargetPlan);
@@ -583,7 +602,7 @@ function archivedLeads() {
 
 function accessibleTabs(user = currentUser) {
   if (!user || isSuperAdminUser(user)) return tabs;
-  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(user.role);
   return tabs.filter(([key]) => allowed.includes(key));
 }
 
@@ -804,7 +823,7 @@ function renderAttendance() {
     return (attendanceBatchLocation(batch) || "Unassigned") === selectedBranch;
   }).map(batch => {
     const branch = attendanceBatchLocation(batch) || selectedBranch || "";
-    const sessions = attendanceWeekSessions(batch, branch);
+    const sessions = attendanceRangeSessions(batch, branch);
     const students = sortAttendanceStudents(attendanceRoster()
       .filter(student => !batch || student.batch === batch)
       .filter(student => !branch || student.branch === branch)
@@ -819,7 +838,9 @@ function renderAttendanceFilters() {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
   const currentBatch = document.getElementById("attendance-batch")?.value || "";
-  const currentStartDate = fridayOfWeek(document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(currentBatch));
+  const fallbackStartDate = attendanceDefaultStartDate(currentBatch);
+  const currentStartDate = document.getElementById("attendance-from-date")?.value || fallbackStartDate;
+  const currentEndDate = document.getElementById("attendance-to-date")?.value || addDaysISO(currentStartDate, 6);
   const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
   const currentBatchGroup = document.getElementById("attendance-batch-group-filter")?.value || "";
   const currentSort = document.getElementById("attendance-sort")?.value || "firstName";
@@ -845,9 +866,8 @@ function renderAttendanceFilters() {
       <option value="asc" ${currentSortDir === "asc" ? "selected" : ""}>A to Z / Old First</option>
       <option value="desc" ${currentSortDir === "desc" ? "selected" : ""}>Z to A / New First</option>
     </select>`,
-    `<button class="attendance-week-btn" type="button" data-attendance-week="prev">&lt; Previous Block</button>`,
-    `<label class="attendance-start-label">Block Date <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}" readonly tabindex="-1"></label>`,
-    `<button class="attendance-week-btn" type="button" data-attendance-week="next">Next Block &gt;</button>`,
+    `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`,
+    `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`,
     `<select id="attendance-status-filter">
       <option value="">All P / A</option>
       <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>
@@ -906,7 +926,11 @@ function attendanceSortValue(student, field) {
 }
 
 function selectedAttendanceStartDate(batch = selectedAttendanceBatch()) {
-  return fridayOfWeek(document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch));
+  return document.getElementById("attendance-from-date")?.value || attendanceDefaultStartDate(batch);
+}
+
+function selectedAttendanceEndDate(batch = selectedAttendanceBatch()) {
+  return document.getElementById("attendance-to-date")?.value || addDaysISO(selectedAttendanceStartDate(batch), 6);
 }
 
 function attendanceDefaultStartDate(batch = "") {
@@ -967,6 +991,12 @@ function prepareAttendanceForms() {
   if (studentForm?.elements.batch) {
     studentForm.elements.batch.innerHTML = batchOptions;
   }
+  const bulkBatch = document.getElementById("attendanceBulkBatch");
+  if (bulkBatch) {
+    const current = bulkBatch.value;
+    bulkBatch.innerHTML = `<option value="">Select attendance batch</option>${attendanceBatchChoices().map(batch => `<option>${escapeHtml(batch)}</option>`).join("")}`;
+    if (current && [...bulkBatch.options].some(option => option.value === current)) bulkBatch.value = current;
+  }
   if (sessionForm) {
     if (sessionForm.elements.batch) sessionForm.elements.batch.innerHTML = batchOptions;
     if (sessionForm.elements.subject) sessionForm.elements.subject.innerHTML = attendancePaperOptions(selectedAttendanceBatch() || sessionForm.elements.batch?.value || "").map(paper => `<option>${escapeHtml(paper)}</option>`).join("");
@@ -1003,25 +1033,40 @@ function attendanceSessionsForBatch(batch, branch = "") {
     .sort((a, b) => `${a.date} ${a.subject}`.localeCompare(`${b.date} ${b.subject}`));
 }
 
-function attendanceWeekSessions(batch, branch = "") {
-  const saved = attendanceSessionsForBatch(batch, branch);
+function attendanceRangeSessions(batch, branch = "") {
   const start = selectedAttendanceStartDate(batch);
-  const startDate = new Date(`${start}T00:00:00`);
-  return Array.from({ length: 7 }, (_, index) => {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + index);
-    const date = d.toISOString().slice(0, 10);
-    const existing = saved.find(session => session.date === date);
-    return existing || {
-      id: `draft|${encodeURIComponent(batch)}|${date}`,
-      draft: true,
-      batch,
-      branch,
-      date,
-      subject: "",
-      prof: ""
-    };
+  const end = selectedAttendanceEndDate(batch);
+  const saved = attendanceSessionsForBatch(batch, branch)
+    .filter(session => !start || session.date >= start)
+    .filter(session => !end || session.date <= end);
+  const sessions = [...saved];
+  dateRangeList(start, end).forEach(date => {
+    if (!sessions.some(session => session.date === date)) {
+      sessions.push({
+        id: `draft|${encodeURIComponent(batch)}|${date}`,
+        draft: true,
+        batch,
+        branch,
+        date,
+        subject: "",
+        prof: ""
+      });
+    }
   });
+  return sessions.sort((a, b) => `${a.date} ${a.subject || ""} ${a.prof || ""}`.localeCompare(`${b.date} ${b.subject || ""} ${b.prof || ""}`));
+}
+
+function dateRangeList(start, end) {
+  const from = new Date(`${start || todayDate()}T00:00:00`);
+  const to = new Date(`${end || start || todayDate()}T00:00:00`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) return [];
+  const days = [];
+  const current = new Date(from);
+  while (current <= to && days.length < 45) {
+    days.push(current.toISOString().slice(0, 10));
+    current.setDate(current.getDate() + 1);
+  }
+  return days;
 }
 
 function attendanceRoster() {
@@ -1422,8 +1467,10 @@ function renderSettings() {
   ];
   document.getElementById("settingsGrid").innerHTML = `
     ${groups.map(([key, title]) => renderMasterEditor(key, title)).join("")}
+    ${renderRoleTabAccessDesigner()}
     ${renderLeadColumnDesigner()}
     ${renderAttendanceColumnDesigner()}
+    ${renderAttendanceStudentMasterPanel()}
     <section class="panel">
       <h2>Add Admin / User</h2>
       <form id="settingsUserForm" class="form-grid">
@@ -1451,9 +1498,61 @@ function renderSettings() {
     <p id="sheetSyncStatus" class="bulk-help hidden"></p>`;
 
   bindSettingsForms();
+  prepareAttendanceForms();
   renderUserTabAccess("settingsUserTabAccess");
   renderSettingsUsers();
   renderSheetSyncSettings();
+}
+
+function renderAttendanceStudentMasterPanel() {
+  return `<section class="panel">
+    <h2>Attendance Students</h2>
+    <p class="bulk-help">Add students here. Attendance Register remains only for marking attendance and viewing date-wise records.</p>
+    <form id="attendanceStudentForm" class="form-grid">
+      <strong>Add Attendance Student</strong>
+      <input name="firstName" placeholder="First name" required>
+      <input name="lastName" placeholder="Last name" required>
+      <input name="admissionDate" type="date" placeholder="Admission date">
+      <select name="batchGroup">
+        <option value="">Batch A/B</option>
+        <option>A</option>
+        <option>B</option>
+      </select>
+      <input name="studentId" placeholder="Student ID">
+      <select name="batch" required></select>
+      <select name="studentType">
+        <option>Demo</option>
+        <option>Admitted</option>
+      </select>
+      <button class="primary">Add Student</button>
+    </form>
+    <div class="attendance-bulk-box">
+      <select id="attendanceBulkBatch"></select>
+      <textarea id="attendanceBulkNames" rows="4" placeholder="Paste from Excel with headers, or one student per line. Example:&#10;First Name	Last	Admission Date	Batch	Student ID&#10;Aman	R	14-06-2026	A	STU001"></textarea>
+      <button type="button" class="primary" id="addAttendanceBulk">Add Students to Selected Batch</button>
+    </div>
+  </section>`;
+}
+
+function renderRoleTabAccessDesigner() {
+  const disabled = !isSuperAdmin() ? "disabled" : "";
+  const roleAccess = normalizeRoleTabAccess(state.roleTabAccess || {}, masters.roles);
+  return `<section class="panel role-access-panel">
+    <h2>Role Based Dashboard / Tab Access</h2>
+    <p class="bulk-help">Set default tabs for each role. When you select a role while adding/editing a user, these tabs are applied automatically and can still be edited user-wise.</p>
+    <div class="role-access-list">
+      ${mastersRoleNames(roleAccess, masters.roles).map(role => {
+        const selected = roleAccess[role] || roleTabDefaults(role);
+        return `<div class="role-access-card" data-role-access="${escapeAttr(role)}">
+          <strong>${escapeHtml(role)}</strong>
+          <div class="access-grid compact">
+            ${tabs.map(([key, label]) => `<label><input type="checkbox" value="${key}" ${selected.includes(key) ? "checked" : ""} ${disabled}> ${escapeHtml(label)}</label>`).join("")}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+    <button class="primary" data-save-role-access type="button" ${disabled}>Save Role Access</button>
+  </section>`;
 }
 
 function renderLeadColumnDesigner() {
@@ -1708,10 +1807,11 @@ function withUnassigned(values) {
 function renderUserTabAccess(containerId, user = null) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  const selected = Array.isArray(user?.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  const role = user?.role || container.closest("form")?.elements.role?.value || "";
+  const selected = Array.isArray(user?.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(role);
   const disabled = !isSuperAdmin() ? "disabled" : "";
   container.innerHTML = `
-    <label class="access-title">Tabs visible to this user</label>
+    <label class="access-title">Tabs visible to this user <span class="muted">(role default can be edited here)</span></label>
     <div class="access-grid">
       ${tabs.map(([key, label]) => `<label><input type="checkbox" name="tabAccess" value="${key}" ${selected.includes(key) ? "checked" : ""} ${disabled}> ${escapeHtml(label)}</label>`).join("")}
     </div>`;
@@ -1724,9 +1824,31 @@ function collectTabAccess(form) {
 
 function userAccessLabel(user) {
   if (isSuperAdminUser(user)) return "All tabs";
-  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? user.tabAccess : tabs.map(([key]) => key);
+  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(user.role);
   if (allowed.length === tabs.length) return "All tabs";
   return allowed.map(key => tabs.find(tab => tab[0] === key)?.[1] || key).join(", ");
+}
+
+function saveRoleTabAccess() {
+  if (!isSuperAdmin()) return alert("Only Super Admin can save role access.");
+  const next = {};
+  document.querySelectorAll("[data-role-access]").forEach(card => {
+    const role = card.dataset.roleAccess;
+    next[role] = [...card.querySelectorAll("input[type='checkbox']:checked")].map(input => input.value);
+    if (!next[role].length) next[role] = ["dashboard"];
+  });
+  state.roleTabAccess = normalizeRoleTabAccess(next, masters.roles);
+  save();
+  render();
+}
+
+function applyRoleDefaultsToUserForm(form) {
+  if (!form || !isSuperAdmin()) return;
+  const role = form.elements.role?.value || "";
+  const selected = roleTabDefaults(role);
+  form.querySelectorAll('input[name="tabAccess"]').forEach(input => {
+    input.checked = selected.includes(input.value);
+  });
 }
 
 function getSheetSyncSettings() {
@@ -2835,6 +2957,8 @@ function bindSettingsForms() {
     });
   });
   document.getElementById("settingsUserForm")?.addEventListener("submit", saveUser);
+  document.getElementById("attendanceStudentForm")?.addEventListener("submit", saveAttendanceStudent);
+  document.getElementById("addAttendanceBulk")?.addEventListener("click", addBulkAttendanceStudents);
   document.getElementById("targetForm")?.addEventListener("submit", saveTarget);
 }
 
@@ -2860,7 +2984,13 @@ function updateExistingRecordsForMaster(key, oldValue, newValue) {
   const leadField = { courses: "course", branches: "branch", sources: "source", statuses: "status", roles: "role" }[key];
   if (leadField) state.leads.forEach(lead => { if (lead[leadField] === oldValue) lead[leadField] = newValue; });
   if (key === "branches") state.users.forEach(user => { if (user.branch === oldValue) user.branch = newValue; });
-  if (key === "roles") state.users.forEach(user => { if (user.role === oldValue) user.role = newValue; });
+  if (key === "roles") {
+    state.users.forEach(user => { if (user.role === oldValue) user.role = newValue; });
+    if (state.roleTabAccess?.[oldValue]) {
+      state.roleTabAccess[newValue] = state.roleTabAccess[oldValue];
+      delete state.roleTabAccess[oldValue];
+    }
+  }
   if (key === "courses") {
     state.templates.forEach(template => { if (template.course === oldValue) template.course = newValue; });
     state.admissions.forEach(admission => { if (admission.course === oldValue) admission.course = newValue; });
@@ -4109,6 +4239,7 @@ function routeActions(e) {
       render();
     }
   }
+  if (button.dataset.saveRoleAccess !== undefined) saveRoleTabAccess();
   if (button.dataset.backupData !== undefined) downloadDataBackup();
   if (button.dataset.restoreData !== undefined) document.getElementById("restoreDataFile")?.click();
   if (button.dataset.addLeadColumn !== undefined) addLeadColumn();
@@ -4156,11 +4287,17 @@ function routeActions(e) {
   }
   if (button.dataset.clearAttendanceFilters !== undefined) {
     document.querySelectorAll("#attendanceFilters select").forEach(el => { el.value = ""; });
+    document.querySelectorAll("#attendanceFilters input").forEach(el => { el.value = ""; });
     renderAttendance();
   }
 }
 
 function routeSelectActions(e) {
+  const userRoleSelect = e.target.closest("#userForm [name='role'], #settingsUserForm [name='role']");
+  if (userRoleSelect) {
+    applyRoleDefaultsToUserForm(userRoleSelect.form);
+    return;
+  }
   const headerField = e.target.closest("[data-attendance-session-field]");
   if (headerField) {
     updateAttendanceSessionField(headerField.dataset.attendanceSessionField, headerField.value);
@@ -4320,7 +4457,7 @@ function createAttendanceStudentFromGrid(encoded) {
 function addBulkAttendanceStudents() {
   const textarea = document.getElementById("attendanceBulkNames");
   const text = textarea?.value || "";
-  const batch = selectedAttendanceBatch();
+  const batch = document.getElementById("attendanceBulkBatch")?.value || selectedAttendanceBatch();
   if (!batch) return alert("Select one attendance batch first, then paste student names.");
   const branch = attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
   if (!canManageAttendanceBranch(branch)) return alert("You can add attendance students only for your branch.");

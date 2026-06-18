@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260618-planner-attendance-link">
+  <link rel="stylesheet" href="styles.css?v=20260618-attendance-date-range-master">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -120,8 +120,6 @@
         </div>
         <div class="filters" id="attendanceFilters"></div>
         <div class="attendance-bulk-box">
-          <textarea id="attendanceBulkNames" rows="3" placeholder="Paste from Excel with headers, or one student per line. Example:&#10;First Name	Last	Admission Date	Batch	Student ID&#10;Aman	R	14-06-2026	A	STU001"></textarea>
-          <button type="button" class="primary" id="addAttendanceBulk">Add Students to Selected Batch</button>
           <button type="button" id="importPlannerTimetable">Update Lectures from Timetable</button>
         </div>
         <div id="attendanceGrid" class="table-wrap attendance-wrap"></div>
@@ -138,24 +136,6 @@
             <input name="attempt" placeholder="Attempt e.g. D26" required>
             <select name="location" required></select>
             <button class="primary">Create Batch</button>
-          </form>
-          <form id="attendanceStudentForm" class="form-grid hidden">
-            <strong>Add Attendance Student</strong>
-            <input name="firstName" placeholder="First name" required>
-            <input name="lastName" placeholder="Last name" required>
-            <input name="admissionDate" type="date" placeholder="Admission date">
-            <select name="batchGroup">
-              <option value="">Batch A/B</option>
-              <option>A</option>
-              <option>B</option>
-            </select>
-            <input name="studentId" placeholder="Student ID">
-            <select name="batch" required></select>
-            <select name="studentType">
-              <option>Demo</option>
-              <option>Admitted</option>
-            </select>
-            <button class="primary">Add Student</button>
           </form>
           <form id="attendanceSessionForm" class="form-grid hidden">
             <strong>Add Lecture Column</strong>
@@ -553,6 +533,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260618-planner-attendance-link"></script>
+  <script src="app.js?v=20260618-attendance-date-range-master"></script>
 </body>
 </html>
