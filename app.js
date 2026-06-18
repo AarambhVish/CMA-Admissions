@@ -695,6 +695,7 @@ function bindEvents() {
   document.getElementById("exportCampaigns")?.addEventListener("click", () => alert("Export is disabled."));
   document.body.addEventListener("click", routeActions);
   document.body.addEventListener("change", routeSelectActions);
+  document.body.addEventListener("input", routeAttendanceFilterInputs);
   document.body.addEventListener("change", routeAttendanceTextEdits);
   document.addEventListener("copy", blockProtectedCopy);
   document.addEventListener("cut", blockProtectedCopy);
@@ -1051,8 +1052,7 @@ function renderAttendanceFilters(values = currentAttendanceFilters()) {
   const branchSelect = `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
   const fromInput = `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`;
   const toInput = `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`;
-  const applyButton = `<button class="attendance-filter-apply" data-apply-attendance-filters type="button" title="Apply attendance filters">&gt;</button>`;
-  el.innerHTML = [batchSelect, branchSelect, fromInput, toInput, applyButton].join("");
+  el.innerHTML = [batchSelect, branchSelect, fromInput, toInput].join("");
 }
 
 function selectedAttendanceStatusFilter() {
@@ -4702,6 +4702,12 @@ function routeSelectActions(e) {
   if (action === "assignBranch") assignLeadBranch(leadId);
   if (action === "assignAdmin") assignLeadAdmin(leadId);
   if (action === "archive") archiveLead(leadId);
+}
+
+function routeAttendanceFilterInputs(e) {
+  if (["attendance-from-date", "attendance-to-date"].includes(e.target.id)) {
+    renderAttendance();
+  }
 }
 
 function routeAttendanceTextEdits(e) {
