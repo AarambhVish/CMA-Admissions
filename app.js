@@ -1020,10 +1020,16 @@ function admissionViewRows() {
     assignedTo: row.assignedTo || row.counsellor || ""
   }));
 
+  attendanceRoster()
+    .filter(student => canAccessAttendanceBatch(student.batch, student.branch))
+    .filter(student => admissionAttendanceMatchesStatus(student, statusFilter))
+    .forEach(student => pushUnique(attendanceStudentToAdmissionView(student, statusFilter)));
+
   activeLeads()
     .filter(lead => !lead.archivedAt)
     .filter(lead => canViewAdmissionLead(lead))
     .filter(lead => !hasAdmissionForLead(lead))
+    .filter(lead => !hasAttendanceAdmissionViewForLead(lead))
     .filter(lead => lead.status !== "Converted / Admitted")
     .forEach(lead => pushUnique({
       ...lead,
@@ -1035,11 +1041,6 @@ function admissionViewRows() {
       balance: ""
     }));
 
-  attendanceRoster()
-    .filter(student => canAccessAttendanceBatch(student.batch, student.branch))
-    .filter(student => admissionAttendanceMatchesStatus(student, statusFilter))
-    .forEach(student => pushUnique(attendanceStudentToAdmissionView(student, statusFilter)));
-
   return rows.sort((a, b) => `${admissionStatusSort(a)}|${a.batch || ""}|${a.admissionDate || ""}|${displayLeadName(a)}`.localeCompare(`${admissionStatusSort(b)}|${b.batch || ""}|${b.admissionDate || ""}|${displayLeadName(b)}`, undefined, { numeric: true, sensitivity: "base" }));
 }
 
@@ -1049,6 +1050,31 @@ function admissionStatusSort(row) {
 
 function hasAdmissionForLead(lead) {
   return state.admissions.some(admission => admission.leadId === lead.id && !admission.archivedAt);
+}
+
+function hasAttendanceAdmissionViewForLead(lead) {
+  return attendanceRoster().some(student => attendanceStudentMatchesLead(student, lead));
+}
+
+function attendanceStudentMatchesLead(student, lead) {
+  if (student.leadId && student.leadId === lead.id) return true;
+  const leadPhone = onlyPhone(lead.studentMobile || "");
+  const studentPhone = onlyPhone(student.studentMobile || student.mobile || "");
+  if (leadPhone && studentPhone && leadPhone === studentPhone) return true;
+  const leadName = normalizePersonName(displayLeadName(lead));
+  const studentName = normalizePersonName([student.firstName, student.lastName || student.lastInitial].filter(Boolean).join(" "));
+  if (!leadName || !studentName || leadName !== studentName) return false;
+  const leadBatch = normalizeAttendanceChoice(lead.batch || "");
+  const studentBatch = normalizeAttendanceChoice(student.batch || "");
+  if (leadBatch && studentBatch && leadBatch !== studentBatch) return false;
+  const leadBranch = normalizeAttendanceChoice(lead.branch || "");
+  const studentBranch = normalizeAttendanceChoice(student.branch || "");
+  if (leadBranch && studentBranch && leadBranch !== studentBranch) return false;
+  return true;
+}
+
+function leadForAttendanceStudent(student) {
+  return activeLeads().find(lead => !lead.archivedAt && attendanceStudentMatchesLead(student, lead)) || null;
 }
 
 function canViewAdmissionLead(lead) {
@@ -1070,6 +1096,7 @@ function admissionRowMatchesFilters(row) {
 
 function admissionFilterStatus(row) {
   if (row.recordSource === "Admission") return "Converted / Admitted";
+  if (row.recordSource === "Attendance" && row.studentId) return "Converted / Admitted";
   return row.leadStatus || row.status || row.studentType || "";
 }
 
@@ -1084,22 +1111,25 @@ function admissionViewKey(row) {
 
 function admissionAttendanceMatchesStatus(student, statusFilter) {
   if (!statusFilter) return true;
-  const status = student.studentType === "Admitted" ? "Converted / Admitted" : "";
+  const linkedLead = leadForAttendanceStudent(student);
+  const status = student.studentId || student.studentType === "Admitted" ? "Converted / Admitted" : linkedLead?.status || "";
   return status === statusFilter;
 }
 
 function attendanceStudentToAdmissionView(student, statusFilter) {
-  const isAdmitted = student.studentType === "Admitted";
-  const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? student.studentType || "" : "Not Yet Admitted";
+  const linkedLead = leadForAttendanceStudent(student);
+  const isAdmitted = Boolean(student.studentId) || student.studentType === "Admitted";
+  const leadStatus = isAdmitted ? "Converted / Admitted" : linkedLead?.status || "";
+  const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? leadStatus || student.studentType || "" : "Not Yet Admitted";
   return {
     id: `attendance-view-${student.id}`,
-    leadId: student.leadId || "",
+    leadId: student.leadId || linkedLead?.id || "",
     admissionId: student.admissionId || "",
     firstName: student.firstName || "",
     lastName: student.lastName || student.lastInitial || "",
     studentName: [student.firstName, student.lastName || student.lastInitial].filter(Boolean).join(" "),
-    studentMobile: student.studentMobile || student.mobile || "",
-    course: attendanceCourseFromBatch(student.batch || ""),
+    studentMobile: student.studentMobile || student.mobile || linkedLead?.studentMobile || "",
+    course: linkedLead?.course || attendanceCourseFromBatch(student.batch || ""),
     batch: student.batch || "Unassigned",
     branch: student.branch || attendanceBatchLocation(student.batch || "") || "",
     admissionDate: isAdmitted ? student.admissionDate || "" : "",
@@ -1107,24 +1137,26 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
     feesPaid: "",
     balance: "",
     paymentMode: "",
-    receiptNumber: "",
-    counsellor: student.counsellor || student.createdBy || "",
-    assignedTo: student.counsellor || student.createdBy || "",
-    source: "Attendance",
+    receiptNumber: student.studentId || "",
+    studentId: student.studentId || "",
+    counsellor: student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    assignedTo: student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    source: linkedLead?.source || "Attendance",
     recordSource: "Attendance",
     studentType: student.studentType || "",
-    leadStatus: isAdmitted ? "Converted / Admitted" : "",
+    leadStatus,
     admissionDisplayStatus: displayStatus
   };
 }
 
 function renderAdmissions() {
-  table("admissionTable", admissionViewRows(), ["Student", "Mobile", "Course", "Batch", "Branch", "Admission Status", "Lead Status", "Admission date", "Fees", "Paid", "Balance", "Counsellor", "Source"], r => [
+  table("admissionTable", admissionViewRows(), ["Student", "Mobile", "Course", "Batch", "Branch", "Student ID", "Admission Status", "Lead Status", "Admission date", "Fees", "Paid", "Balance", "Counsellor", "Source"], r => [
     escapeHtml(displayLeadName(r) || r.studentName || "Student"),
     escapeHtml(r.studentMobile || ""),
     escapeHtml(r.course || ""),
     escapeHtml(r.batch || ""),
     escapeHtml(r.branch || ""),
+    escapeHtml(r.studentId || r.receiptNumber || ""),
     statusText(r.admissionDisplayStatus || ""),
     statusText(r.leadStatus || ""),
     escapeHtml(r.admissionDate || ""),
