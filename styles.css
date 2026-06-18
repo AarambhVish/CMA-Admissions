@@ -322,6 +322,45 @@ th {
 }
 tbody tr:hover { background: #f8fbff; }
 td.actions { white-space: nowrap; }
+.table-sort {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  font-size: inherit;
+  font-weight: 800;
+}
+.compact-select,
+.compact-date {
+  width: 100%;
+  min-width: 112px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 5px;
+}
+#admissionTable table {
+  min-width: 1180px;
+}
+#admissionTable th,
+#admissionTable td {
+  padding: 8px 9px;
+  line-height: 1.25;
+}
+#admissionTable .delete-col {
+  width: 34px;
+  min-width: 34px;
+  text-align: center;
+  padding: 6px 4px;
+}
+.admission-delete {
+  width: 22px;
+  height: 22px;
+}
 #leadTable table {
   table-layout: fixed;
   min-width: 1080px;

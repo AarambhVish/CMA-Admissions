@@ -173,6 +173,7 @@ let isCloudLoading = false;
 let legacySheetPayload = null;
 let admissionSheetPayload = null;
 let syncAdmissionsAfterLegacy = false;
+let admissionSort = { key: "status", direction: "asc" };
 
 function id() { return Math.random().toString(36).slice(2, 10); }
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -896,7 +897,7 @@ function renderFilters() {
 }
 function buildFilters(containerId, prefix) {
   const currentValues = {};
-  ["course", "branch", "source", "status", "assignedTo"].forEach(key => {
+  ["course", "branch", "source", "status", "assignedTo", "followupDate"].forEach(key => {
     const el = document.getElementById(`${prefix}-${key}`);
     if (el) currentValues[key] = el.value;
   });
@@ -904,10 +905,11 @@ function buildFilters(containerId, prefix) {
     selectFilter(prefix, "course", "Course", masters.courses),
     selectFilter(prefix, "branch", "Branch", masters.branches),
     selectFilter(prefix, "source", "Reference", masters.sources),
-    selectFilter(prefix, "status", "Lead status", masters.statuses),
+    selectFilter(prefix, "status", "Lead status", prefix === "admission" ? [...new Set([...masters.statuses, "Yet to Take Admission"])] : masters.statuses),
     selectFilter(prefix, "assignedTo", "Admin", state.users.map(u => u.name)),
+    prefix === "admission" ? `<label class="inline-date-filter">Follow-up <input id="${prefix}-followupDate" type="date"></label>` : "",
     `<button data-clear-filters="${prefix}">Clear</button>`
-  ].join("");
+  ].filter(Boolean).join("");
   const el = document.getElementById(containerId);
   if (el) {
     el.innerHTML = html;
@@ -1017,7 +1019,8 @@ function admissionViewRows() {
     recordSource: "Admission",
     leadStatus: row.status || "Converted / Admitted",
     admissionDisplayStatus: "Converted / Admitted",
-    assignedTo: row.assignedTo || row.counsellor || ""
+    counsellor: branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || row.counsellor || row.assignedTo || "",
+    assignedTo: branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || row.assignedTo || row.counsellor || ""
   }));
 
   attendanceRoster()
@@ -1034,18 +1037,49 @@ function admissionViewRows() {
     .forEach(lead => pushUnique({
       ...lead,
       batch: lead.batch || "Unassigned",
-      counsellor: lead.assignedTo || "",
+      counsellor: branchInchargeName(lead.branch || "") || lead.assignedTo || "",
+      assignedTo: branchInchargeName(lead.branch || "") || lead.assignedTo || "",
       recordSource: "Lead",
       leadStatus: lead.status || "New Lead",
-      admissionDisplayStatus: statusFilter ? lead.status || "New Lead" : "Not Yet Admitted",
+      admissionDisplayStatus: statusFilter ? lead.status || "New Lead" : "Yet to Take Admission",
       balance: ""
     }));
 
-  return rows.sort((a, b) => `${admissionStatusSort(a)}|${a.batch || ""}|${a.admissionDate || ""}|${displayLeadName(a)}`.localeCompare(`${admissionStatusSort(b)}|${b.batch || ""}|${b.admissionDate || ""}|${displayLeadName(b)}`, undefined, { numeric: true, sensitivity: "base" }));
+  return sortAdmissionRows(rows);
 }
 
 function admissionStatusSort(row) {
   return row.admissionDisplayStatus === "Converted / Admitted" ? "0" : "1";
+}
+
+function sortAdmissionRows(rows) {
+  const factor = admissionSort.direction === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const left = admissionSortValue(a, admissionSort.key);
+    const right = admissionSortValue(b, admissionSort.key);
+    if (left === right) {
+      return `${admissionStatusSort(a)}|${a.batch || ""}|${a.admissionDate || ""}|${displayLeadName(a)}`.localeCompare(`${admissionStatusSort(b)}|${b.batch || ""}|${b.admissionDate || ""}|${displayLeadName(b)}`, undefined, { numeric: true, sensitivity: "base" });
+    }
+    return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }) * factor;
+  });
+}
+
+function admissionSortValue(row, key) {
+  const values = {
+    name: displayLeadName(row) || row.studentName || "",
+    mobile: row.studentMobile || "",
+    course: row.course || "",
+    batch: row.batch || "",
+    branch: row.branch || "",
+    studentId: row.studentId || row.receiptNumber || "",
+    status: admissionFilterStatus(row),
+    leadStatus: row.leadStatus || "",
+    admissionDate: row.admissionDate || "",
+    followupAt: row.followupAt || "",
+    counsellor: row.counsellor || row.assignedTo || "",
+    source: row.recordSource || ""
+  };
+  return String(values[key] ?? "").toLowerCase();
 }
 
 function hasAdmissionForLead(lead) {
@@ -1077,6 +1111,15 @@ function leadForAttendanceStudent(student) {
   return activeLeads().find(lead => !lead.archivedAt && attendanceStudentMatchesLead(student, lead)) || null;
 }
 
+function branchInchargeName(branch = "") {
+  const normalizedBranch = normalizeAttendanceChoice(branch);
+  if (!normalizedBranch) return "";
+  const primary = state.users.find(user => normalizeAttendanceChoice(user.branch || "") === normalizedBranch);
+  if (primary) return primary.name;
+  const accessUser = state.users.find(user => userBranchList(user).map(normalizeAttendanceChoice).includes(normalizedBranch));
+  return accessUser?.name || "";
+}
+
 function canViewAdmissionLead(lead) {
   if (!currentUser || canManageAllAttendance()) return true;
   const userName = normalizePersonName(currentUser.name || "");
@@ -1086,18 +1129,24 @@ function canViewAdmissionLead(lead) {
 }
 
 function admissionRowMatchesFilters(row) {
-  return ["course", "branch", "source", "status", "assignedTo"].every(key => {
+  return ["course", "branch", "source", "status", "assignedTo", "followupDate"].every(key => {
     const selected = document.getElementById(`admission-${key}`)?.value || "";
     if (!selected) return true;
     if (key === "status") return admissionFilterStatus(row) === selected;
+    if (key === "followupDate") return String(row.followupAt || "").slice(0, 10) === selected;
     return String(row[key] || "") === selected;
   });
 }
 
 function admissionFilterStatus(row) {
   if (row.recordSource === "Admission") return "Converted / Admitted";
-  if (row.recordSource === "Attendance" && row.studentId) return "Converted / Admitted";
+  if (row.recordSource === "Attendance" && hasAttendanceAdmissionDetails(row)) return "Converted / Admitted";
   return row.leadStatus || row.status || row.studentType || "";
+}
+
+function hasAttendanceAdmissionDetails(student) {
+  const studentId = String(student.studentId || "").trim();
+  return Boolean(studentId && !/demo/i.test(studentId) && String(student.admissionDate || "").trim());
 }
 
 function admissionViewKey(row) {
@@ -1112,35 +1161,39 @@ function admissionViewKey(row) {
 function admissionAttendanceMatchesStatus(student, statusFilter) {
   if (!statusFilter) return true;
   const linkedLead = leadForAttendanceStudent(student);
-  const status = student.studentId || student.studentType === "Admitted" ? "Converted / Admitted" : linkedLead?.status || "";
+  const status = hasAttendanceAdmissionDetails(student) ? "Converted / Admitted" : linkedLead?.status || student.leadStatus || "Yet to Take Admission";
   return status === statusFilter;
 }
 
 function attendanceStudentToAdmissionView(student, statusFilter) {
   const linkedLead = leadForAttendanceStudent(student);
-  const isAdmitted = Boolean(student.studentId) || student.studentType === "Admitted";
-  const leadStatus = isAdmitted ? "Converted / Admitted" : linkedLead?.status || "";
-  const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? leadStatus || student.studentType || "" : "Not Yet Admitted";
+  const isAdmitted = hasAttendanceAdmissionDetails(student);
+  const leadStatus = isAdmitted ? "Converted / Admitted" : linkedLead?.status || student.leadStatus || "Yet to Take Admission";
+  const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? leadStatus : "Yet to Take Admission";
+  const branch = student.branch || attendanceBatchLocation(student.batch || "") || "";
+  const branchIncharge = branchInchargeName(branch);
   return {
     id: `attendance-view-${student.id}`,
     leadId: student.leadId || linkedLead?.id || "",
     admissionId: student.admissionId || "",
+    attendanceStudentId: student.id,
     firstName: student.firstName || "",
     lastName: student.lastName || student.lastInitial || "",
     studentName: [student.firstName, student.lastName || student.lastInitial].filter(Boolean).join(" "),
     studentMobile: student.studentMobile || student.mobile || linkedLead?.studentMobile || "",
     course: linkedLead?.course || attendanceCourseFromBatch(student.batch || ""),
     batch: student.batch || "Unassigned",
-    branch: student.branch || attendanceBatchLocation(student.batch || "") || "",
-    admissionDate: isAdmitted ? student.admissionDate || "" : "",
+    branch,
+    admissionDate: student.admissionDate || "",
     feesAgreed: "",
     feesPaid: "",
     balance: "",
     paymentMode: "",
     receiptNumber: student.studentId || "",
     studentId: student.studentId || "",
-    counsellor: student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
-    assignedTo: student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    counsellor: branchIncharge || student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    assignedTo: branchIncharge || student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    followupAt: linkedLead?.followupAt || "",
     source: linkedLead?.source || "Attendance",
     recordSource: "Attendance",
     studentType: student.studentType || "",
@@ -1150,22 +1203,115 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
 }
 
 function renderAdmissions() {
-  table("admissionTable", admissionViewRows(), ["Student", "Mobile", "Course", "Batch", "Branch", "Student ID", "Admission Status", "Lead Status", "Admission date", "Fees", "Paid", "Balance", "Counsellor", "Source"], r => [
-    escapeHtml(displayLeadName(r) || r.studentName || "Student"),
-    escapeHtml(r.studentMobile || ""),
-    escapeHtml(r.course || ""),
-    escapeHtml(r.batch || ""),
-    escapeHtml(r.branch || ""),
-    escapeHtml(r.studentId || r.receiptNumber || ""),
-    statusText(r.admissionDisplayStatus || ""),
-    statusText(r.leadStatus || ""),
-    escapeHtml(r.admissionDate || ""),
-    r.recordSource === "Admission" ? money(r.feesAgreed) : "",
-    r.recordSource === "Admission" ? money(r.feesPaid) : "",
-    r.recordSource === "Admission" ? money(r.balance) : "",
-    escapeHtml(r.counsellor || r.assignedTo || ""),
-    escapeHtml(r.recordSource || "")
-  ]);
+  const target = document.getElementById("admissionTable");
+  const rows = admissionViewRows();
+  const columns = [
+    ["name", "Student"],
+    ["mobile", "Mobile"],
+    ["course", "Course"],
+    ["batch", "Batch"],
+    ["branch", "Branch"],
+    ["studentId", "Student ID"],
+    ["status", "Admission Status"],
+    ["leadStatus", "Lead Status"],
+    ["admissionDate", "Admission Date"],
+    ["followupAt", "Next Follow-up"],
+    ["counsellor", "Counsellor"],
+    ["source", "Source"]
+  ];
+  if (!target) return;
+  if (!rows.length) {
+    target.innerHTML = "<p class='muted'>No records found.</p>";
+    return;
+  }
+  target.innerHTML = `<table>
+    <thead><tr>${columns.map(([key, label]) => `<th><button class="table-sort" type="button" data-admission-sort="${key}">${escapeHtml(label)}${admissionSort.key === key ? ` ${admissionSort.direction === "asc" ? "▲" : "▼"}` : ""}</button></th>`).join("")}</tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td>${escapeHtml(displayLeadName(row) || row.studentName || "Student")}</td>
+      <td>${escapeHtml(row.studentMobile || "")}</td>
+      <td>${escapeHtml(row.course || "")}</td>
+      <td>${escapeHtml(row.batch || "")}</td>
+      <td>${escapeHtml(row.branch || "")}</td>
+      <td>${escapeHtml(row.studentId || row.receiptNumber || "")}</td>
+      <td>${statusText(row.admissionDisplayStatus || "")}</td>
+      <td>${admissionLeadStatusCell(row)}</td>
+      <td>${admissionDateCell(row)}</td>
+      <td>${dueLabel(row)}</td>
+      <td>${escapeHtml(row.counsellor || row.assignedTo || "")}</td>
+      <td>${escapeHtml(row.recordSource || "")}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+
+function admissionLeadStatusCell(row) {
+  if (admissionFilterStatus(row) === "Converted / Admitted") return statusText(row.leadStatus || "Converted / Admitted");
+  const options = [...new Set(["Yet to Take Admission", ...masters.statuses.filter(status => status !== "Converted / Admitted")])];
+  const value = row.leadStatus || "Yet to Take Admission";
+  const recordKey = admissionRecordKey(row);
+  return `<select class="compact-select" data-admission-lead-status="${escapeAttr(recordKey)}">
+    ${options.map(status => `<option value="${escapeAttr(status)}" ${status === value ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+  </select>`;
+}
+
+function admissionDateCell(row) {
+  if (row.recordSource === "Attendance") {
+    return `<input class="compact-date" type="date" data-admission-date="${escapeAttr(admissionRecordKey(row))}" value="${escapeAttr(normalizeDateInput(row.admissionDate || "") || row.admissionDate || "")}">`;
+  }
+  return escapeHtml(row.admissionDate || "");
+}
+
+function admissionRecordKey(row) {
+  if (row.recordSource === "Attendance") return `attendance:${row.attendanceStudentId || row.id.replace(/^attendance-view-/, "")}`;
+  if (row.recordSource === "Lead") return `lead:${row.id}`;
+  if (row.recordSource === "Admission") return `admission:${row.id || row.admissionId || ""}`;
+  return `${row.recordSource || "row"}:${row.id || ""}`;
+}
+
+function renderAdmissions() {
+  const target = document.getElementById("admissionTable");
+  const rows = admissionViewRows();
+  const columns = [
+    ["delete", ""],
+    ["name", "Student"],
+    ["mobile", "Mobile"],
+    ["course", "Course"],
+    ["batch", "Batch"],
+    ["branch", "Branch"],
+    ["studentId", "Student ID"],
+    ["status", "Admission Status"],
+    ["leadStatus", "Lead Status"],
+    ["admissionDate", "Admission Date"],
+    ["followupAt", "Next Follow-up"],
+    ["counsellor", "Counsellor"],
+    ["source", "Source"]
+  ];
+  if (!target) return;
+  if (!rows.length) {
+    target.innerHTML = "<p class='muted'>No records found.</p>";
+    return;
+  }
+  target.innerHTML = `<table>
+    <thead><tr>${columns.map(([key, label]) => key === "delete" ? `<th class="delete-col"></th>` : `<th><button class="table-sort" type="button" data-admission-sort="${key}">${escapeHtml(label)}${admissionSort.key === key ? ` ${admissionSort.direction === "asc" ? "^" : "v"}` : ""}</button></th>`).join("")}</tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td class="delete-col">${admissionDeleteCell(row)}</td>
+      <td>${escapeHtml(displayLeadName(row) || row.studentName || "Student")}</td>
+      <td>${escapeHtml(row.studentMobile || "")}</td>
+      <td>${escapeHtml(row.course || "")}</td>
+      <td>${escapeHtml(row.batch || "")}</td>
+      <td>${escapeHtml(row.branch || "")}</td>
+      <td>${escapeHtml(row.studentId || row.receiptNumber || "")}</td>
+      <td>${statusText(row.admissionDisplayStatus || "")}</td>
+      <td>${admissionLeadStatusCell(row)}</td>
+      <td>${admissionDateCell(row)}</td>
+      <td>${dueLabel(row)}</td>
+      <td>${escapeHtml(row.counsellor || row.assignedTo || "")}</td>
+      <td>${escapeHtml(row.recordSource || "")}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+
+function admissionDeleteCell(row) {
+  return `<button class="pill-remove admission-delete" data-admission-delete="${escapeAttr(admissionRecordKey(row))}" type="button" title="Archive">x</button>`;
 }
 
 function renderAttendance() {
@@ -4757,6 +4903,7 @@ function routeActions(e) {
   if (button.dataset.wa) sendWhatsApp(button.dataset.wa);
   if (button.dataset.archiveLead) archiveLead(button.dataset.archiveLead);
   if (button.dataset.archiveAttendanceStudent) archiveAttendanceStudent(button.dataset.archiveAttendanceStudent);
+  if (button.dataset.admissionDelete) archiveAdmissionRow(button.dataset.admissionDelete);
   if (button.dataset.restoreAttendanceStudent) restoreAttendanceStudent(button.dataset.restoreAttendanceStudent);
   if (button.dataset.permanentDeleteAttendanceStudent) permanentlyDeleteAttendanceStudent(button.dataset.permanentDeleteAttendanceStudent);
   if (button.dataset.attendanceMark) updateAttendanceStatus(button.dataset.attendanceMark, button.dataset.mark);
@@ -4840,6 +4987,9 @@ function routeActions(e) {
     document.querySelectorAll("#attendanceFilters input").forEach(el => { el.value = ""; });
     renderAttendance();
   }
+  if (button.dataset.admissionSort) {
+    updateAdmissionSort(button.dataset.admissionSort);
+  }
 }
 
 function routeSelectActions(e) {
@@ -4869,6 +5019,16 @@ function routeSelectActions(e) {
   const attendanceRemark = e.target.closest("[data-attendance-remark]");
   if (attendanceRemark) {
     updateAttendanceRemark(attendanceRemark.dataset.attendanceRemark, attendanceRemark.value);
+    return;
+  }
+  const admissionDate = e.target.closest("[data-admission-date]");
+  if (admissionDate) {
+    updateAdmissionDate(admissionDate.dataset.admissionDate, admissionDate.value);
+    return;
+  }
+  const admissionLeadStatus = e.target.closest("[data-admission-lead-status]");
+  if (admissionLeadStatus) {
+    updateAdmissionLeadStatus(admissionLeadStatus.dataset.admissionLeadStatus, admissionLeadStatus.value);
     return;
   }
   if (e.target.id === "restoreDataFile") {
@@ -4906,6 +5066,76 @@ function routeSelectActions(e) {
   if (action === "assignBranch") assignLeadBranch(leadId);
   if (action === "assignAdmin") assignLeadAdmin(leadId);
   if (action === "archive") archiveLead(leadId);
+}
+
+function updateAdmissionSort(key) {
+  if (admissionSort.key === key) {
+    admissionSort.direction = admissionSort.direction === "asc" ? "desc" : "asc";
+  } else {
+    admissionSort = { key, direction: "asc" };
+  }
+  renderAdmissions();
+}
+
+function updateAdmissionDate(recordKey, value) {
+  const [type, recordId] = String(recordKey || "").split(":");
+  const normalizedDate = normalizeDateInput(value) || value || "";
+  if (type === "attendance") {
+    const student = state.attendanceStudents.find(item => item.id === recordId);
+    if (!student) return;
+    student.admissionDate = normalizedDate;
+    save();
+    renderAdmissions();
+  }
+}
+
+function updateAdmissionLeadStatus(recordKey, value) {
+  const [type, recordId] = String(recordKey || "").split(":");
+  if (type === "lead") {
+    const lead = state.leads.find(item => item.id === recordId);
+    if (!lead) return;
+    lead.status = value;
+    markLeadTouched(lead, "Admission Status");
+    save();
+    renderAdmissions();
+    return;
+  }
+  if (type === "attendance") {
+    const student = state.attendanceStudents.find(item => item.id === recordId);
+    if (!student) return;
+    const linkedLead = leadForAttendanceStudent(student);
+    if (linkedLead) {
+      linkedLead.status = value;
+      markLeadTouched(linkedLead, "Admission Status");
+    } else {
+      student.leadStatus = value;
+    }
+    save();
+    renderAdmissions();
+  }
+}
+
+function archiveAdmissionRow(recordKey) {
+  const [type, recordId] = String(recordKey || "").split(":");
+  if (type === "attendance") {
+    archiveAttendanceStudent(recordId);
+    return;
+  }
+  if (type === "lead") {
+    archiveLead(recordId);
+    return;
+  }
+  if (type !== "admission") return;
+  const admission = state.admissions.find(item => item.id === recordId);
+  const row = admissionsWithLead().find(item => item.id === recordId || item.admissionId === recordId);
+  if (!admission || !row) return;
+  if (!canViewAdmissionRow(row)) return alert("You can archive only admission records available to your login.");
+  const name = displayLeadName(row) || "this admission record";
+  if (!confirm(`Move ${name} from Admissions to archive? It will not be permanently deleted.`)) return;
+  admission.archivedAt = new Date().toISOString();
+  admission.archivedBy = currentUser?.name || "";
+  save();
+  render();
 }
 
 function routeAttendanceFilterInputs(e) {
