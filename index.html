@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260618-cloud-no-reset">
+  <link rel="stylesheet" href="styles.css?v=20260618-login-reset-password">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -20,6 +20,7 @@
       <input name="loginId" placeholder="First name, mobile, or email" required>
       <input name="password" type="password" placeholder="Password" required autocomplete="current-password">
       <button class="primary">Login</button>
+      <button type="button" id="openResetPassword" class="ghost">Reset Password</button>
       <p id="loginError" class="warning hidden"></p>
       <p class="bulk-help">Existing users without a password will set one on first login.</p>
     </form>
@@ -533,6 +534,24 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260618-cloud-no-reset"></script>
+  <dialog id="resetPasswordDialog">
+    <form id="resetPasswordForm" method="dialog" class="modal-form">
+      <div class="modal-head">
+        <h2>Reset Password</h2>
+        <button type="button" class="ghost" data-close-reset-password>Close</button>
+      </div>
+      <p class="bulk-help">Enter your first name, mobile, or email exactly as saved by Super Admin.</p>
+      <input name="loginId" placeholder="First name, mobile, or email" required autocomplete="username">
+      <input name="newPassword" type="password" placeholder="New password" minlength="4" required autocomplete="new-password">
+      <input name="confirmPassword" type="password" placeholder="Confirm password" minlength="4" required autocomplete="new-password">
+      <p id="resetPasswordError" class="warning hidden"></p>
+      <div class="modal-actions">
+        <button type="button" data-close-reset-password>Cancel</button>
+        <button class="primary">Save Password</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js?v=20260618-login-reset-password"></script>
 </body>
 </html>

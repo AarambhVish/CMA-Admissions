@@ -295,6 +295,47 @@ async function saveOwnPassword(e) {
   alert("Password updated.");
 }
 
+async function resetPasswordFromLogin(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  const resetError = document.getElementById("resetPasswordError");
+  const loginId = normalizeLogin(data.loginId);
+  const user = state.users.find(item => loginMatchesUser(loginId, item));
+  if (!user) {
+    resetError.textContent = "User not found. Check first name, mobile, or email.";
+    resetError.classList.remove("hidden");
+    return;
+  }
+  if (String(data.newPassword || "").length < 4) {
+    resetError.textContent = "Password must be at least 4 characters.";
+    resetError.classList.remove("hidden");
+    return;
+  }
+  if (data.newPassword !== data.confirmPassword) {
+    resetError.textContent = "Passwords do not match.";
+    resetError.classList.remove("hidden");
+    return;
+  }
+  user.passwordHash = await hashPassword(data.newPassword);
+  save();
+  e.target.reset();
+  resetError.classList.add("hidden");
+  document.getElementById("resetPasswordDialog").close();
+  const loginError = document.getElementById("loginError");
+  loginError.textContent = "Password reset. Please login with your new password.";
+  loginError.classList.remove("hidden");
+}
+
+function openResetPasswordDialog() {
+  const dialog = document.getElementById("resetPasswordDialog");
+  const loginValue = document.querySelector('#loginForm input[name="loginId"]')?.value || "";
+  const form = document.getElementById("resetPasswordForm");
+  form.reset();
+  form.elements.loginId.value = loginValue;
+  document.getElementById("resetPasswordError")?.classList.add("hidden");
+  dialog.showModal();
+}
+
 function updateAuthView() {
   document.getElementById("loginScreen").classList.toggle("hidden", Boolean(currentUser) || !hasLoginReady());
   const badge = document.getElementById("currentUserBadge");
@@ -424,6 +465,9 @@ function bindEvents() {
   document.getElementById("changePasswordBtn").addEventListener("click", () => document.getElementById("passwordDialog").showModal());
   document.querySelectorAll("[data-close-password]").forEach(b => b.addEventListener("click", () => document.getElementById("passwordDialog").close()));
   document.getElementById("passwordForm").addEventListener("submit", saveOwnPassword);
+  document.getElementById("openResetPassword").addEventListener("click", openResetPasswordDialog);
+  document.querySelectorAll("[data-close-reset-password]").forEach(b => b.addEventListener("click", () => document.getElementById("resetPasswordDialog").close()));
+  document.getElementById("resetPasswordForm").addEventListener("submit", resetPasswordFromLogin);
   document.getElementById("themeSelect").addEventListener("change", e => setTheme(e.target.value));
   document.getElementById("globalSearch").addEventListener("input", render);
   document.getElementById("addLeadTop").addEventListener("click", openLeadForm);
