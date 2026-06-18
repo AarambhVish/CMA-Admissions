@@ -428,14 +428,20 @@ td.actions { white-space: nowrap; }
   text-transform: uppercase;
 }
 .attendance-table .initial-col {
-  min-width: 42px;
-  width: 42px;
+  min-width: 34px;
+  width: 34px;
   text-align: center;
   position: sticky;
   left: 126px;
   z-index: 3;
   background: var(--panel);
   font-weight: 700;
+}
+.attendance-table .initial-col input,
+.attendance-table [style*="width:34px"] input {
+  text-align: center;
+  padding-left: 2px;
+  padding-right: 2px;
 }
 .attendance-table th.initial-col {
   background: #f8fafc;
@@ -446,7 +452,7 @@ td.actions { white-space: nowrap; }
   width: 108px;
   text-align: center;
   position: sticky;
-  left: 168px;
+  left: 160px;
   z-index: 3;
   background: var(--panel);
 }

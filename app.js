@@ -38,7 +38,7 @@ const defaultLeadColumns = [
 
 const defaultAttendanceStudentColumns = [
   { key: "firstName", label: "First Name", width: 126 },
-  { key: "lastName", label: "Last", width: 42 },
+  { key: "lastName", label: "Last", width: 34 },
   { key: "admissionDate", label: "Admission Date", width: 108 },
   { key: "batchGroup", label: "Batch", width: 64 },
   { key: "studentId", label: "Student ID", width: 92 }
@@ -1382,8 +1382,9 @@ function attendanceInfoColumnStyle(column, index, columns) {
 }
 
 function attendanceColumnWidth(column) {
+  if (column.key === "lastName") return 34;
   const fallback = defaultAttendanceStudentColumns.find(item => item.key === column.key)?.width || 96;
-  return Math.max(42, Math.min(180, Number(column.width) || fallback));
+  return Math.max(34, Math.min(180, Number(column.width) || fallback));
 }
 
 function activeAttendanceStudentColumns() {
@@ -1697,6 +1698,7 @@ function renderRoleTabAccessDesigner() {
   const roleAccess = normalizeRoleTabAccess(state.roleTabAccess || {}, masters.roles);
   return `<div class="role-access-inline">
     <h3>What Each Role Can See</h3>
+    ${!isSuperAdmin() ? "<p class='warning'>Login as Super Admin to edit role access.</p>" : ""}
     <p class="bulk-help">Set default tabs for each role. When you select a role while adding/editing a user, these tabs are applied automatically and can still be edited user-wise.</p>
     <div class="role-access-list">
       ${mastersRoleNames(roleAccess, masters.roles).map(role => {
@@ -1718,6 +1720,7 @@ function renderPaperFacultyDesigner() {
   const courses = [...new Set([...(masters.courses || []), ...defaultMasters.courses])].map(canonicalCourseName);
   return `<section class="panel paper-faculty-panel">
     <h2>Paper-wise Professors</h2>
+    ${!isSuperAdmin() ? "<p class='warning'>Login as Super Admin to add or remove professors.</p>" : ""}
     <p class="bulk-help">Add professor names under each course and paper. Attendance will show professor options only after that paper is selected.</p>
     <div class="paper-faculty-grid">
       ${[...new Set(courses)].map(course => `<div class="paper-faculty-course">
@@ -1809,7 +1812,7 @@ function renderAttendanceColumnDesigner() {
           ${options.map(option => `<option value="${escapeAttr(option.key)}" ${option.key === column.key ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
         </select>
         <input data-attendance-column-label value="${escapeAttr(column.label)}" placeholder="Column heading" ${disabled}>
-        <input data-attendance-column-width type="number" min="42" max="180" value="${escapeAttr(attendanceColumnWidth(column))}" placeholder="Width" ${disabled}>
+        <input data-attendance-column-width type="number" min="34" max="180" value="${escapeAttr(attendanceColumnWidth(column))}" placeholder="Width" ${column.key === "lastName" ? "disabled" : disabled}>
         <button class="pill-remove" data-remove-attendance-column="${index}" type="button" title="Remove" ${disabled}>x</button>
       </div>`).join("")}
     </div>
@@ -3201,7 +3204,7 @@ function savePaperFacultyFromForm(form) {
   if (!isSuperAdmin()) return alert("Only Super Admin can edit paper-wise professors.");
   if (!form) return;
   const [course, paper] = form.dataset.paperFacultyForm.split("|");
-  const input = form.elements.value;
+  const input = form.elements.value || form.querySelector("input");
   const value = titleCase(input?.value || "");
   if (!value) {
     input?.focus();
