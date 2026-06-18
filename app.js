@@ -200,6 +200,19 @@ function normalizeStateDefaults(data) {
   data.roleTabAccess = normalizeRoleTabAccess(data.roleTabAccess, data.masters.roles);
   data.customAttendanceFields = Array.isArray(data.customAttendanceFields) ? data.customAttendanceFields : [];
   data.customLeadFields = Array.isArray(data.customLeadFields) ? data.customLeadFields : [];
+  if (!data.users.length) {
+    data.users.push({
+      id: "recovery-admin",
+      name: "Admin",
+      mobile: "",
+      email: "",
+      role: "Super Admin",
+      branch: "Unassigned",
+      branchAccess: [],
+      tabAccess: tabs.map(([key]) => key),
+      passwordHash: "3b612c75a7b5048a435fb6ec81e52ff92d6d795a8b5a9c17070f6a63c97a53b2"
+    });
+  }
   data.leads.forEach(lead => {
     if (!lead.customFields) lead.customFields = {};
     Object.keys(lead.customFields).forEach(field => addUnique(data.customLeadFields, field));
