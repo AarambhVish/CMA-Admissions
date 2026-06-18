@@ -153,6 +153,7 @@ const seed = {
   targets: [],
   leadColumns: structuredClone(defaultLeadColumns),
   attendanceStudentColumns: structuredClone(defaultAttendanceStudentColumns),
+  attendanceLectureColumnWidth: 82,
   roleTabAccess: structuredClone(defaultRoleTabAccess),
   professorDatabaseSeeded: true,
   customAttendanceFields: [],
@@ -226,6 +227,7 @@ function normalizeStateDefaults(data) {
   }
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
   data.attendanceStudentColumns = Array.isArray(data.attendanceStudentColumns) && data.attendanceStudentColumns.length ? data.attendanceStudentColumns : structuredClone(defaultAttendanceStudentColumns);
+  data.attendanceLectureColumnWidth = Number(data.attendanceLectureColumnWidth) || 82;
   data.roleTabAccess = normalizeRoleTabAccess(data.roleTabAccess, data.masters.roles);
   data.customAttendanceFields = Array.isArray(data.customAttendanceFields) ? data.customAttendanceFields : [];
   data.customLeadFields = Array.isArray(data.customLeadFields) ? data.customLeadFields : [];
@@ -697,6 +699,7 @@ function bindEvents() {
   document.body.addEventListener("change", routeSelectActions);
   document.body.addEventListener("input", routeAttendanceFilterInputs);
   document.body.addEventListener("change", routeAttendanceTextEdits);
+  document.body.addEventListener("mousedown", startAttendanceColumnResize);
   document.addEventListener("copy", blockProtectedCopy);
   document.addEventListener("cut", blockProtectedCopy);
   document.addEventListener("contextmenu", blockProtectedContextMenu);
@@ -888,6 +891,7 @@ function setFilterValue(prefix, key, value) {
 function renderFilters() {
   buildFilters("leadFilters", "lead");
   buildFilters("followupFilters", "followup");
+  buildFilters("admissionFilters", "admission");
   buildFilters("reportFilters", "report");
 }
 function buildFilters(containerId, prefix) {
@@ -994,9 +998,141 @@ function renderFollowups() {
   ]);
 }
 
+function admissionViewRows() {
+  const statusFilter = document.getElementById("admission-status")?.value || "";
+  const rows = [];
+  const seen = new Set();
+  const pushUnique = row => {
+    if (!admissionRowMatchesFilters(row)) return;
+    const key = admissionViewKey(row);
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+
+  admissionsWithLead().forEach(row => pushUnique({
+    ...row,
+    course: row.course || attendanceCourseFromBatch(row.batch || ""),
+    branch: row.branch || attendanceBatchLocation(row.batch || "") || "",
+    recordSource: "Admission",
+    leadStatus: row.status || "Converted / Admitted",
+    admissionDisplayStatus: "Converted / Admitted",
+    assignedTo: row.assignedTo || row.counsellor || ""
+  }));
+
+  activeLeads()
+    .filter(lead => !lead.archivedAt)
+    .filter(lead => canViewAdmissionLead(lead))
+    .filter(lead => !hasAdmissionForLead(lead))
+    .filter(lead => lead.status !== "Converted / Admitted")
+    .forEach(lead => pushUnique({
+      ...lead,
+      batch: lead.batch || "Unassigned",
+      counsellor: lead.assignedTo || "",
+      recordSource: "Lead",
+      leadStatus: lead.status || "New Lead",
+      admissionDisplayStatus: statusFilter ? lead.status || "New Lead" : "Not Yet Admitted",
+      balance: ""
+    }));
+
+  attendanceRoster()
+    .filter(student => canAccessAttendanceBatch(student.batch, student.branch))
+    .filter(student => admissionAttendanceMatchesStatus(student, statusFilter))
+    .forEach(student => pushUnique(attendanceStudentToAdmissionView(student, statusFilter)));
+
+  return rows.sort((a, b) => `${admissionStatusSort(a)}|${a.batch || ""}|${a.admissionDate || ""}|${displayLeadName(a)}`.localeCompare(`${admissionStatusSort(b)}|${b.batch || ""}|${b.admissionDate || ""}|${displayLeadName(b)}`, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function admissionStatusSort(row) {
+  return row.admissionDisplayStatus === "Converted / Admitted" ? "0" : "1";
+}
+
+function hasAdmissionForLead(lead) {
+  return state.admissions.some(admission => admission.leadId === lead.id && !admission.archivedAt);
+}
+
+function canViewAdmissionLead(lead) {
+  if (!currentUser || canManageAllAttendance()) return true;
+  const userName = normalizePersonName(currentUser.name || "");
+  if (normalizePersonName(lead.assignedTo || "") === userName) return true;
+  const allowedBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
+  return allowedBranches.includes(normalizeAttendanceChoice(lead.branch || ""));
+}
+
+function admissionRowMatchesFilters(row) {
+  return ["course", "branch", "source", "status", "assignedTo"].every(key => {
+    const selected = document.getElementById(`admission-${key}`)?.value || "";
+    if (!selected) return true;
+    if (key === "status") return admissionFilterStatus(row) === selected;
+    return String(row[key] || "") === selected;
+  });
+}
+
+function admissionFilterStatus(row) {
+  if (row.recordSource === "Admission") return "Converted / Admitted";
+  return row.leadStatus || row.status || row.studentType || "";
+}
+
+function admissionViewKey(row) {
+  if (row.leadId) return `lead:${row.leadId}`;
+  if (row.recordSource === "Lead" && row.id) return `lead:${row.id}`;
+  const phone = onlyPhone(row.studentMobile || row.mobile || "");
+  if (phone) return `phone:${phone}`;
+  const name = normalizePersonName(displayLeadName(row) || row.studentName || "");
+  return `name:${name}|${normalizeAttendanceChoice(row.batch || "")}|${normalizeAttendanceChoice(row.branch || "")}`;
+}
+
+function admissionAttendanceMatchesStatus(student, statusFilter) {
+  if (!statusFilter) return true;
+  const status = student.studentType === "Admitted" ? "Converted / Admitted" : "";
+  return status === statusFilter;
+}
+
+function attendanceStudentToAdmissionView(student, statusFilter) {
+  const isAdmitted = student.studentType === "Admitted";
+  const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? student.studentType || "" : "Not Yet Admitted";
+  return {
+    id: `attendance-view-${student.id}`,
+    leadId: student.leadId || "",
+    admissionId: student.admissionId || "",
+    firstName: student.firstName || "",
+    lastName: student.lastName || student.lastInitial || "",
+    studentName: [student.firstName, student.lastName || student.lastInitial].filter(Boolean).join(" "),
+    studentMobile: student.studentMobile || student.mobile || "",
+    course: attendanceCourseFromBatch(student.batch || ""),
+    batch: student.batch || "Unassigned",
+    branch: student.branch || attendanceBatchLocation(student.batch || "") || "",
+    admissionDate: isAdmitted ? student.admissionDate || "" : "",
+    feesAgreed: "",
+    feesPaid: "",
+    balance: "",
+    paymentMode: "",
+    receiptNumber: "",
+    counsellor: student.counsellor || student.createdBy || "",
+    assignedTo: student.counsellor || student.createdBy || "",
+    source: "Attendance",
+    recordSource: "Attendance",
+    studentType: student.studentType || "",
+    leadStatus: isAdmitted ? "Converted / Admitted" : "",
+    admissionDisplayStatus: displayStatus
+  };
+}
+
 function renderAdmissions() {
-  table("admissionTable", admissionsWithLead(), ["Student", "Mobile", "Course", "Batch", "Admission date", "Fees", "Paid", "Balance", "Mode", "Receipt", "Counsellor"], r => [
-    displayLeadName(r), r.studentMobile, r.course, r.batch, r.admissionDate, money(r.feesAgreed), money(r.feesPaid), money(r.balance), r.paymentMode, r.receiptNumber, r.counsellor
+  table("admissionTable", admissionViewRows(), ["Student", "Mobile", "Course", "Batch", "Branch", "Admission Status", "Lead Status", "Admission date", "Fees", "Paid", "Balance", "Counsellor", "Source"], r => [
+    escapeHtml(displayLeadName(r) || r.studentName || "Student"),
+    escapeHtml(r.studentMobile || ""),
+    escapeHtml(r.course || ""),
+    escapeHtml(r.batch || ""),
+    escapeHtml(r.branch || ""),
+    statusText(r.admissionDisplayStatus || ""),
+    statusText(r.leadStatus || ""),
+    escapeHtml(r.admissionDate || ""),
+    r.recordSource === "Admission" ? money(r.feesAgreed) : "",
+    r.recordSource === "Admission" ? money(r.feesPaid) : "",
+    r.recordSource === "Admission" ? money(r.balance) : "",
+    escapeHtml(r.counsellor || r.assignedTo || ""),
+    escapeHtml(r.recordSource || "")
   ]);
 }
 
@@ -1463,12 +1599,13 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   const infoColumns = activeAttendanceStudentColumns();
   const infoWidth = infoColumns.reduce((sum, column) => sum + attendanceColumnWidth(column), 0);
   const deleteWidth = attendanceDeleteColumnWidth();
+  const lectureStyle = attendanceLectureColumnStyle();
   const subjectHeaders = sessions.length
-    ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
-    : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
+    ? sessions.map(session => `<th class="lecture-col" style="${lectureStyle}">${attendanceSessionTitle(session)}</th>`).join("")
+    : `<th class="lecture-col empty-lecture" style="${lectureStyle}">&lt;Add lecture&gt;</th>`;
   const dateHeaders = sessions.length
-    ? sessions.map(session => `<th class="lecture-col">${attendanceSessionDateTitle(session)}</th>`).join("")
-    : `<th class="lecture-col empty-lecture">Date + Day</th>`;
+    ? sessions.map((session, index) => `<th class="lecture-col attendance-resizable-col" style="${lectureStyle}">${attendanceSessionDateTitle(session)}${attendanceResizeHandle("lecture", "date", `Attendance Date ${index + 1}`)}</th>`).join("")
+    : `<th class="lecture-col empty-lecture attendance-resizable-col" style="${lectureStyle}">Date + Day${attendanceResizeHandle("lecture", "date", "Attendance Date")}</th>`;
   const manualRows = Array.from({ length: Math.max(3, 7 - students.length) }, (_, index) => renderManualAttendanceRow(index, sessions, batchTitle, branchTitle));
   return `<div class="attendance-batch-section">
   <table class="attendance-table">
@@ -1487,7 +1624,7 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
     <tbody>${students.map(student => `<tr>
       <td class="attendance-delete-col" style="left:0;">${student.source === "Manual" ? `<button class="attendance-row-delete" data-archive-attendance-student="${student.id}" type="button" title="Archive student">x</button>` : ""}</td>
       ${infoColumns.map((column, index) => attendanceInfoDataCell(column, index, infoColumns, attendanceStudentFieldCell(student, column.key))).join("")}
-      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
+      ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture" style="${lectureStyle}"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
   </table>
   </div>`;
@@ -1495,15 +1632,16 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
 
 function renderManualAttendanceRow(index, sessions, batch, branch) {
   const infoColumns = activeAttendanceStudentColumns();
+  const lectureStyle = attendanceLectureColumnStyle();
   return `<tr>
     <td class="attendance-delete-col" style="left:0;"></td>
     ${infoColumns.map((column, columnIndex) => attendanceInfoDataCell(column, columnIndex, infoColumns, manualAttendanceFieldControl(index, column, batch, branch))).join("")}
-    ${sessions.map(() => `<td class="attendance-cell empty-lecture">${disabledAttendanceSelect()}</td>`).join("")}
+    ${sessions.map(() => `<td class="attendance-cell empty-lecture" style="${lectureStyle}">${disabledAttendanceSelect()}</td>`).join("")}
   </tr>`;
 }
 
 function attendanceInfoHeaderCell(column, index, columns) {
-  return `<th class="attendance-info-col" style="${attendanceInfoColumnStyle(column, index, columns)}">${escapeHtml(column.label)}</th>`;
+  return `<th class="attendance-info-col attendance-resizable-col" style="${attendanceInfoColumnStyle(column, index, columns)}">${escapeHtml(column.label)}${attendanceResizeHandle("info", column.key, column.label)}</th>`;
 }
 
 function attendanceInfoDataCell(column, index, columns, content) {
@@ -1520,14 +1658,32 @@ function attendanceDeleteColumnWidth() {
   return 22;
 }
 
+function attendanceResizeHandle(type, key, label = "") {
+  if (!canResizeAttendanceColumns()) return "";
+  return `<span class="attendance-resize-handle" data-attendance-resize="${type}" data-attendance-resize-key="${escapeAttr(key)}" title="Drag to resize ${escapeAttr(label || key)}"></span>`;
+}
+
+function canResizeAttendanceColumns() {
+  return Boolean(currentUser);
+}
+
+function attendanceLectureColumnWidth() {
+  return Math.max(52, Math.min(180, Number(state.attendanceLectureColumnWidth) || 82));
+}
+
+function attendanceLectureColumnStyle() {
+  const width = attendanceLectureColumnWidth();
+  return `min-width:${width}px;width:${width}px;`;
+}
+
 function attendanceColumnWidth(column) {
-  if (column.key === "lastName") return 26;
-  if (column.key === "batchGroup") return 44;
-  if (column.key === "studentId") return 58;
-  if (column.key === "firstName") return Math.min(100, Math.max(72, Number(column.width) || 92));
-  if (column.key === "admissionDate") return Math.min(92, Math.max(78, Number(column.width) || 86));
+  if (column.key === "lastName") return Math.max(24, Math.min(60, Number(column.width) || 26));
+  if (column.key === "batchGroup") return Math.max(34, Math.min(90, Number(column.width) || 44));
+  if (column.key === "studentId") return Math.max(44, Math.min(140, Number(column.width) || 58));
+  if (column.key === "firstName") return Math.max(60, Math.min(180, Number(column.width) || 92));
+  if (column.key === "admissionDate") return Math.max(68, Math.min(140, Number(column.width) || 86));
   const fallback = defaultAttendanceStudentColumns.find(item => item.key === column.key)?.width || 84;
-  return Math.max(34, Math.min(120, Number(column.width) || fallback));
+  return Math.max(34, Math.min(180, Number(column.width) || fallback));
 }
 
 function activeAttendanceStudentColumns() {
@@ -1581,14 +1737,15 @@ function lastInitialOnly(value) {
 }
 
 function attendanceCell(student, session) {
+  const lectureStyle = attendanceLectureColumnStyle();
   if (isBeforeStudentAdmission(student, session)) {
-    return `<td class="attendance-cell not-applicable" title="Student was not in batch on this date">NA</td>`;
+    return `<td class="attendance-cell not-applicable" style="${lectureStyle}" title="Student was not in batch on this date">NA</td>`;
   }
   const record = attendanceRecord(student.id, session.id);
   const status = record.present === false ? "absent" : "present";
   const selected = record.present === false ? "absent" : "present";
   const markKey = attendancePayload({ studentId: student.id, sessionId: session.id, batch: session.batch, branch: session.branch, date: session.date });
-  return `<td class="attendance-cell ${status}">
+  return `<td class="attendance-cell ${status}" style="${lectureStyle}">
     <select class="attendance-status-select active-attendance-control" data-attendance-status="${markKey}">
       <option value="present" ${selected === "present" ? "selected" : ""}>P</option>
       <option value="absent" ${selected === "absent" ? "selected" : ""}>A</option>
@@ -4723,6 +4880,57 @@ function routeAttendanceFilterInputs(e) {
   if (["attendance-from-date", "attendance-to-date"].includes(e.target.id)) {
     renderAttendance();
   }
+}
+
+function startAttendanceColumnResize(e) {
+  const handle = e.target.closest("[data-attendance-resize]");
+  if (!handle || !canResizeAttendanceColumns()) return;
+  e.preventDefault();
+  const type = handle.dataset.attendanceResize;
+  const key = handle.dataset.attendanceResizeKey;
+  const startX = e.clientX;
+  const startWidth = type === "lecture"
+    ? attendanceLectureColumnWidth()
+    : attendanceColumnWidth(activeAttendanceStudentColumns().find(column => column.key === key) || { key });
+  let pendingWidth = startWidth;
+  document.body.classList.add("attendance-resizing");
+  const onMove = event => {
+    const delta = event.clientX - startX;
+    pendingWidth = clampAttendanceColumnWidth(type, key, startWidth + delta);
+    applyAttendanceColumnWidth(type, key, pendingWidth, { saveNow: false });
+    renderAttendance();
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    document.body.classList.remove("attendance-resizing");
+    applyAttendanceColumnWidth(type, key, pendingWidth, { saveNow: true });
+    renderAttendance();
+  };
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+}
+
+function clampAttendanceColumnWidth(type, key, width) {
+  const value = Math.round(Number(width) || 0);
+  if (type === "lecture") return Math.max(52, Math.min(180, value));
+  if (key === "lastName") return Math.max(24, Math.min(60, value));
+  if (key === "batchGroup") return Math.max(34, Math.min(90, value));
+  if (key === "studentId") return Math.max(44, Math.min(140, value));
+  if (key === "firstName") return Math.max(60, Math.min(180, value));
+  if (key === "admissionDate") return Math.max(68, Math.min(140, value));
+  return Math.max(34, Math.min(180, value));
+}
+
+function applyAttendanceColumnWidth(type, key, width, { saveNow = false } = {}) {
+  const nextWidth = clampAttendanceColumnWidth(type, key, width);
+  if (type === "lecture") {
+    state.attendanceLectureColumnWidth = nextWidth;
+  } else {
+    const columns = activeAttendanceStudentColumns();
+    state.attendanceStudentColumns = columns.map(column => column.key === key ? { ...column, width: nextWidth } : column);
+  }
+  if (saveNow) save();
 }
 
 function routeAttendanceTextEdits(e) {

@@ -452,6 +452,35 @@ td.actions { white-space: nowrap; }
   z-index: 3;
   background: var(--panel);
 }
+.attendance-table .lecture-col.attendance-resizable-col {
+  position: relative;
+}
+.attendance-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  touch-action: none;
+}
+.attendance-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 3px;
+  border-left: 1px solid transparent;
+}
+.attendance-resize-handle:hover::after {
+  border-left-color: #2563eb;
+}
+.attendance-resizing,
+.attendance-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
 .attendance-table .attendance-delete-col {
   min-width: 22px;
   width: 22px;
