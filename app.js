@@ -593,8 +593,8 @@ function userBranchLabel(user) {
 function canManageAttendanceBranch(branch) {
   if (!currentUser) return false;
   if (canSuperAdminEditAttendance() || isLeadManager()) return true;
-  const ownBranches = userBranchList(currentUser);
-  return ownBranches.includes(branch);
+  const ownBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
+  return ownBranches.includes(normalizeAttendanceChoice(branch));
 }
 
 function hasLoginReady() {
@@ -1001,9 +1001,10 @@ function renderAdmissions() {
 
 function renderAttendance() {
   prepareAttendanceForms();
-  renderAttendanceFilters();
-  const selectedBatch = selectedAttendanceBatch();
-  const selectedBranch = document.getElementById("attendance-branch")?.value || "";
+  const filters = currentAttendanceFilters();
+  renderAttendanceFilters(filters);
+  const selectedBatch = filters.batch;
+  const selectedBranch = filters.branch;
   const statusFilter = selectedAttendanceStatusFilter();
   const batchGroupFilter = selectedAttendanceBatchGroupFilter();
   const sortField = selectedAttendanceSortField();
@@ -1011,13 +1012,13 @@ function renderAttendance() {
   const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
   const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
     if (!selectedBranch || selectedBatch) return true;
-    return (attendanceBatchLocation(batch) || "Unassigned") === selectedBranch;
+    return sameAttendanceChoice(attendanceBatchLocation(batch) || "Unassigned", selectedBranch);
   }).map(batch => {
     const branch = attendanceBatchLocation(batch) || selectedBranch || "";
     const sessions = attendanceRangeSessions(batch, branch);
     const students = sortAttendanceStudents(attendanceRoster()
       .filter(student => !batch || student.batch === batch)
-      .filter(student => !branch || student.branch === branch)
+      .filter(student => !branch || sameAttendanceChoice(student.branch || "Unassigned", branch))
       .filter(student => !batchGroupFilter || student.batchGroup === batchGroupFilter)
       .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter)), sortField, sortDirection);
     return { batch, branch, students, sessions };
@@ -1025,26 +1026,33 @@ function renderAttendance() {
   renderAttendanceGrid(sections);
 }
 
-function renderAttendanceFilters() {
+function currentAttendanceFilters() {
+  const batch = document.getElementById("attendance-batch")?.value || "";
+  const branch = document.getElementById("attendance-branch")?.value || "";
+  const fromDate = document.getElementById("attendance-from-date")?.value || attendanceDefaultStartDate(batch);
+  const toDate = document.getElementById("attendance-to-date")?.value || addDaysISO(fromDate, 6);
+  return { batch, branch, fromDate, toDate };
+}
+
+function renderAttendanceFilters(values = currentAttendanceFilters()) {
   const el = document.getElementById("attendanceFilters");
   if (!el) return;
-  const currentBatch = document.getElementById("attendance-batch")?.value || "";
+  const currentBatch = values.batch || "";
   const fallbackStartDate = attendanceDefaultStartDate(currentBatch);
-  const currentStartDate = document.getElementById("attendance-from-date")?.value || fallbackStartDate;
-  const currentEndDate = document.getElementById("attendance-to-date")?.value || addDaysISO(currentStartDate, 6);
+  const currentStartDate = values.fromDate || fallbackStartDate;
+  const currentEndDate = values.toDate || addDaysISO(currentStartDate, 6);
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
-    ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || ""
+    ? attendanceBatchLocation(currentBatch) || values.branch || ""
     : adminBranch;
   const batchChoices = attendanceBatchChoices();
-  el.innerHTML = [
-    `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`,
-    `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`,
-    `<button class="attendance-filter-apply" data-apply-attendance-filters type="button" title="Apply attendance filters">→</button>`
-  ].join("");
+  const batchSelect = `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
+  const branchSelect = `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
+  const fromInput = `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`;
+  const toInput = `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`;
+  const applyButton = `<button class="attendance-filter-apply" data-apply-attendance-filters type="button" title="Apply attendance filters">&gt;</button>`;
+  el.innerHTML = [batchSelect, branchSelect, fromInput, toInput, applyButton].join("");
 }
 
 function selectedAttendanceStatusFilter() {
@@ -1134,15 +1142,31 @@ function attendanceStudentMatchesStatus(student, sessions, statusFilter) {
 
 function attendanceBatchLocation(batchName = "") {
   const existing = state.attendanceSessions.find(session => session.batch === batchName && session.branch)?.branch
-    || state.attendanceStudents.find(student => student.batch === batchName && student.branch)?.branch;
+    || state.attendanceStudents.find(student => student.batch === batchName && student.branch)?.branch
+    || admissionRowsForAttendance().find(admission => admission.batch === batchName && admission.branch)?.branch;
   if (existing) return existing;
   const parts = String(batchName || "").split("_").filter(Boolean);
   return parts.length >= 3 ? parts.slice(2).join(" ") : "";
 }
 
+function normalizeAttendanceChoice(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function sameAttendanceChoice(left = "", right = "") {
+  return normalizeAttendanceChoice(left) === normalizeAttendanceChoice(right);
+}
+
 function attendanceBranchChoices() {
   if (!canManageAllAttendance()) return userBranchList(currentUser).length ? userBranchList(currentUser) : ["Unassigned"];
-  return withUnassigned(masters.branches);
+  const batchBranches = attendanceBatchChoices().map(batch => attendanceBatchLocation(batch));
+  const savedBranches = [
+    ...state.attendanceStudents.map(student => student.branch),
+    ...state.attendanceSessions.map(session => session.branch),
+    ...admissionRowsForAttendance().map(admission => admission.branch)
+  ];
+  const all = withUnassigned([...masters.branches, ...batchBranches, ...savedBranches].filter(Boolean));
+  return all.filter((branch, index) => all.findIndex(item => sameAttendanceChoice(item, branch)) === index);
 }
 
 function prepareAttendanceForms() {
@@ -1179,10 +1203,9 @@ function prepareAttendanceForms() {
 }
 
 function attendanceBatchChoices() {
-  const choices = [...new Set([...(masters.attendanceBatches || []), ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch)].filter(Boolean))];
+  const choices = [...new Set([...(masters.attendanceBatches || []), ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch), ...admissionRowsForAttendance().map(row => row.batch)].filter(Boolean))];
   if (!canManageAllAttendance()) {
-    const ownBranches = userBranchList(currentUser).map(branch => branch.toLowerCase());
-    return choices.filter(batch => !ownBranches.length || ownBranches.some(branch => batch.toLowerCase().includes(branch)));
+    return choices.filter(batch => canAccessAttendanceBatch(batch, attendanceBatchLocation(batch)));
   }
   return choices;
 }
@@ -1260,12 +1283,77 @@ function dateRangeList(start, end) {
 
 function attendanceRoster() {
   const manual = state.attendanceStudents.filter(student => !student.archivedAt).map(student => ({ ...student, lastName: student.lastName || student.lastInitial || "", lastInitial: (student.lastName || student.lastInitial || "").slice(0, 1).toUpperCase(), source: "Manual" }));
+  const admissions = admissionRowsForAttendance().map(admissionToAttendanceStudent).filter(Boolean);
   const byKey = new Map();
   manual.forEach(student => {
     const key = `${student.batch}|${student.branch}|${student.firstName}|${student.lastInitial}`.toLowerCase();
     if (!byKey.has(key)) byKey.set(key, student);
   });
+  admissions.forEach(student => {
+    const key = `${student.batch}|${student.branch}|${student.firstName}|${student.lastInitial}`.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, student);
+  });
   return [...byKey.values()].sort((a, b) => `${a.firstName} ${a.lastInitial}`.localeCompare(`${b.firstName} ${b.lastInitial}`));
+}
+
+function admissionRowsForAttendance() {
+  return admissionsWithLead().filter(row => {
+    const batch = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
+    return batch && batch !== "Unassigned";
+  });
+}
+
+function admissionToAttendanceStudent(row) {
+  const name = displayLeadName(row) || row.studentName || row.name || "Student";
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  const firstName = titleCase(row.firstName || parts[0] || "Student");
+  const lastName = lastInitialOnly(row.lastName || parts.slice(1).join(" ") || "");
+  const batch = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
+  if (!batch) return null;
+  const branch = row.branch || attendanceBatchLocation(batch) || "Unassigned";
+  return {
+    id: `admission-${row.id}`,
+    admissionId: row.id,
+    leadId: row.leadId,
+    firstName,
+    lastName,
+    lastInitial: lastName.slice(0, 1).toUpperCase(),
+    admissionDate: row.admissionDate || "",
+    batchGroup: row.batchGroup || "",
+    studentId: row.studentId || row.receiptNumber || "",
+    customFields: row.customFields || {},
+    batch,
+    branch,
+    counsellor: row.counsellor || row.assignedTo || "",
+    studentType: "Admitted",
+    createdAt: row.admissionDate || row.createdAt || "",
+    createdBy: row.counsellor || row.assignedTo || "",
+    source: "Admission"
+  };
+}
+
+function normalizeAttendanceBatch(batch = "") {
+  return String(batch || "").trim() || "Unassigned";
+}
+
+function canAccessAttendanceBatch(batch = "", branch = "") {
+  if (canManageAllAttendance()) return true;
+  const normalizedBatch = normalizeAttendanceChoice(batch);
+  const normalizedBranch = normalizeAttendanceChoice(branch || attendanceBatchLocation(batch));
+  const userName = normalizePersonName(currentUser?.name || "");
+  const ownBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
+  const hasOwnAdmission = admissionsWithLead().some(row =>
+    normalizeAttendanceChoice(row.batch || "") === normalizedBatch &&
+    (normalizePersonName(row.counsellor || "") === userName || normalizePersonName(row.assignedTo || "") === userName)
+  );
+  const batchHasAdmissions = state.admissions.some(admission => normalizeAttendanceChoice(admission.batch || "") === normalizedBatch);
+  const hasOwnManualStudent = state.attendanceStudents.some(student =>
+    !student.archivedAt &&
+    normalizeAttendanceChoice(student.batch || "") === normalizedBatch &&
+    normalizePersonName(student.createdBy || "") === userName
+  );
+  const hasBranchAccess = normalizedBranch && ownBranches.includes(normalizedBranch);
+  return hasOwnAdmission || hasOwnManualStudent || (!batchHasAdmissions && hasBranchAccess);
 }
 
 function attendanceStudentName(student) {
@@ -1390,7 +1478,7 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
-      <td class="attendance-delete-col" style="left:0;"><button class="attendance-row-delete" data-archive-attendance-student="${student.id}" type="button" title="Archive student">x</button></td>
+      <td class="attendance-delete-col" style="left:0;">${student.source === "Manual" ? `<button class="attendance-row-delete" data-archive-attendance-student="${student.id}" type="button" title="Archive student">x</button>` : ""}</td>
       ${infoColumns.map((column, index) => attendanceInfoDataCell(column, index, infoColumns, attendanceStudentFieldCell(student, column.key))).join("")}
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
@@ -1600,7 +1688,17 @@ function campaignStats(campaign) {
 function admissionsWithLead() {
   return state.admissions
     .map(a => ({ ...state.leads.find(l => l.id === a.leadId), ...a, balance: Number(a.feesAgreed || 0) - Number(a.feesPaid || 0) }))
-    .filter(row => !row.archivedAt);
+    .filter(row => !row.archivedAt)
+    .filter(row => canViewAdmissionRow(row))
+    .sort((a, b) => `${a.batch || ""}|${a.admissionDate || ""}|${displayLeadName(a)}`.localeCompare(`${b.batch || ""}|${b.admissionDate || ""}|${displayLeadName(b)}`, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function canViewAdmissionRow(row) {
+  if (!currentUser || canManageAllAttendance()) return true;
+  const userName = normalizePersonName(currentUser.name || "");
+  if (normalizePersonName(row.counsellor || "") === userName) return true;
+  if (normalizePersonName(row.assignedTo || "") === userName) return true;
+  return false;
 }
 
 function renderTemplates() {
@@ -3142,7 +3240,10 @@ function upsertAdmissionFromSheet(lead, data) {
     counsellor: data.counsellor || lead.assignedTo || "",
     remarks: appendRemark(`Imported from admission sheet: ${data.sheetName}`, data.remarks)
   };
-  if (payload.batch && payload.batch !== "Unassigned") addUnique(masters.batches, payload.batch);
+  if (payload.batch && payload.batch !== "Unassigned") {
+    addUnique(masters.batches, payload.batch);
+    addUnique(masters.attendanceBatches, payload.batch);
+  }
   if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
   if (existing) {
     Object.assign(existing, { ...payload, id: existing.id });
@@ -3779,7 +3880,7 @@ function saveAttendanceSession(e) {
   const data = Object.fromEntries(new FormData(e.target).entries());
   if (!data.batch || !data.date || !data.subject || !data.prof) return alert("Add batch, date, paper, and professor.");
   const selectedBranch = attendanceBatchLocation(data.batch) || attendanceAdminBranch() || "Unassigned";
-  if (!canManageAttendanceBranch(selectedBranch)) return alert("You can add lecture columns only for your branch.");
+  if (!canAccessAttendanceBatch(data.batch, selectedBranch)) return alert("You can add lecture columns only for your batch.");
   state.attendanceSessions.push({
     id: id(),
     batch: data.batch,
@@ -3872,7 +3973,8 @@ function canManageAttendanceCell(studentId, sessionId) {
   const session = state.attendanceSessions.find(item => item.id === sessionId);
   const draft = draftSessionFromId(sessionId);
   const branch = student?.branch || session?.branch || draft?.branch || attendanceBatchLocation(draft?.batch) || attendanceAdminBranch();
-  return canManageAttendanceBranch(branch);
+  const batch = student?.batch || session?.batch || draft?.batch || "";
+  return canAccessAttendanceBatch(batch, branch);
 }
 
 function renderLeadCustomFields(lead = {}) {
@@ -3971,7 +4073,10 @@ function saveAdmission(e) {
   const data = Object.fromEntries(new FormData(e.target).entries());
   const lead = state.leads.find(l => l.id === data.leadId);
   lead.status = "Converted / Admitted";
+  lead.batch = data.batch || lead.batch || "Unassigned";
+  lead.branch = lead.branch || "Unassigned";
   markLeadTouched(lead, "Admission");
+  if (data.batch && data.batch !== "Unassigned") addUnique(masters.attendanceBatches, data.batch);
   state.admissions.unshift({ ...data, id: id() });
   save();
   document.getElementById("admissionDialog").close();
@@ -4534,6 +4639,10 @@ function routeActions(e) {
 }
 
 function routeSelectActions(e) {
+  if (["attendance-batch", "attendance-branch", "attendance-from-date", "attendance-to-date"].includes(e.target.id)) {
+    renderAttendance();
+    return;
+  }
   const userRoleSelect = e.target.closest("#userForm [name='role'], #settingsUserForm [name='role']");
   if (userRoleSelect) {
     applyRoleDefaultsToUserForm(userRoleSelect.form);
@@ -4629,7 +4738,7 @@ function updateAttendanceSessionField(encoded, value) {
   const { sessionId, field, date } = payload;
   const batch = payload.batch || selectedAttendanceBatch();
   const branch = payload.branch || attendanceBatchLocation(batch) || document.getElementById("attendance-branch")?.value || attendanceAdminBranch() || "Unassigned";
-  if (!canManageAttendanceBranch(branch)) return alert("You can edit lecture details only for your branch.");
+  if (!canAccessAttendanceBatch(batch, branch)) return alert("You can edit lecture details only for your batch.");
   const existing = state.attendanceSessions.find(item => item.id === sessionId);
   const current = existing || draftSessionFromId(sessionId) || {};
   const updates = {
@@ -5138,3 +5247,4 @@ function exportCsv(filename, rows) {
   a.download = filename;
   a.click();
 }
+
