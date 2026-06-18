@@ -1467,7 +1467,6 @@ function renderSettings() {
   ];
   document.getElementById("settingsGrid").innerHTML = `
     ${groups.map(([key, title]) => renderMasterEditor(key, title)).join("")}
-    ${renderRoleTabAccessDesigner()}
     ${renderLeadColumnDesigner()}
     ${renderAttendanceColumnDesigner()}
     ${renderAttendanceStudentMasterPanel()}
@@ -1537,8 +1536,8 @@ function renderAttendanceStudentMasterPanel() {
 function renderRoleTabAccessDesigner() {
   const disabled = !isSuperAdmin() ? "disabled" : "";
   const roleAccess = normalizeRoleTabAccess(state.roleTabAccess || {}, masters.roles);
-  return `<section class="panel role-access-panel">
-    <h2>Role Based Dashboard / Tab Access</h2>
+  return `<div class="role-access-inline">
+    <h3>What Each Role Can See</h3>
     <p class="bulk-help">Set default tabs for each role. When you select a role while adding/editing a user, these tabs are applied automatically and can still be edited user-wise.</p>
     <div class="role-access-list">
       ${mastersRoleNames(roleAccess, masters.roles).map(role => {
@@ -1552,7 +1551,7 @@ function renderRoleTabAccessDesigner() {
       }).join("")}
     </div>
     <button class="primary" data-save-role-access type="button" ${disabled}>Save Role Access</button>
-  </section>`;
+  </div>`;
 }
 
 function renderLeadColumnDesigner() {
@@ -1797,6 +1796,7 @@ function renderMasterEditor(key, title) {
       <input name="value" placeholder="Add ${title.toLowerCase()}" required>
       <button class="primary">Add</button>
     </form>
+    ${key === "roles" ? renderRoleTabAccessDesigner() : ""}
   </section>`;
 }
 
