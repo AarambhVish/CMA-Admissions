@@ -37,11 +37,11 @@ const defaultLeadColumns = [
 ];
 
 const defaultAttendanceStudentColumns = [
-  { key: "firstName", label: "First Name", width: 126 },
-  { key: "lastName", label: "Last", width: 34 },
-  { key: "admissionDate", label: "Admission Date", width: 108 },
-  { key: "batchGroup", label: "Batch", width: 64 },
-  { key: "studentId", label: "Student ID", width: 92 }
+  { key: "firstName", label: "First Name", width: 92 },
+  { key: "lastName", label: "Last", width: 26 },
+  { key: "admissionDate", label: "Admission Date", width: 86 },
+  { key: "batchGroup", label: "Batch", width: 44 },
+  { key: "studentId", label: "Student ID", width: 58 }
 ];
 
 const defaultMasters = {
@@ -1275,10 +1275,17 @@ function dateRangeList(start, end) {
   const days = [];
   const current = new Date(from);
   while (current <= to && days.length < 45) {
-    days.push(current.toISOString().slice(0, 10));
+    days.push(localDateISO(current));
     current.setDate(current.getDate() + 1);
   }
   return days;
+}
+
+function localDateISO(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function attendanceRoster() {
@@ -1380,7 +1387,7 @@ function attendanceSessionDateTitle(session) {
   const date = new Date(`${session.date}T00:00:00`);
   const day = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { weekday: "short" });
   const shortDate = Number.isNaN(date.getTime()) ? session.date : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }).replaceAll(" ", "-");
-  return `<span class="attendance-date-label">${escapeHtml(shortDate)} ${escapeHtml(day)}</span>`;
+  return `<span class="attendance-date-label"><span>${escapeHtml(shortDate)}</span><span>${escapeHtml(day)}</span></span>`;
 }
 
 function attendanceRecordKey(studentId, sessionId) {
@@ -1455,7 +1462,7 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   const branchTitle = branch || attendanceBatchLocation(batch) || "All Branches";
   const infoColumns = activeAttendanceStudentColumns();
   const infoWidth = infoColumns.reduce((sum, column) => sum + attendanceColumnWidth(column), 0);
-  const deleteWidth = 28;
+  const deleteWidth = attendanceDeleteColumnWidth();
   const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
@@ -1504,15 +1511,23 @@ function attendanceInfoDataCell(column, index, columns, content) {
 }
 
 function attendanceInfoColumnStyle(column, index, columns) {
-  const left = 28 + columns.slice(0, index).reduce((sum, item) => sum + attendanceColumnWidth(item), 0);
+  const left = attendanceDeleteColumnWidth() + columns.slice(0, index).reduce((sum, item) => sum + attendanceColumnWidth(item), 0);
   const width = attendanceColumnWidth(column);
   return `min-width:${width}px;width:${width}px;left:${left}px;`;
 }
 
+function attendanceDeleteColumnWidth() {
+  return 22;
+}
+
 function attendanceColumnWidth(column) {
-  if (column.key === "lastName") return 34;
-  const fallback = defaultAttendanceStudentColumns.find(item => item.key === column.key)?.width || 96;
-  return Math.max(34, Math.min(180, Number(column.width) || fallback));
+  if (column.key === "lastName") return 26;
+  if (column.key === "batchGroup") return 44;
+  if (column.key === "studentId") return 58;
+  if (column.key === "firstName") return Math.min(100, Math.max(72, Number(column.width) || 92));
+  if (column.key === "admissionDate") return Math.min(92, Math.max(78, Number(column.width) || 86));
+  const fallback = defaultAttendanceStudentColumns.find(item => item.key === column.key)?.width || 84;
+  return Math.max(34, Math.min(120, Number(column.width) || fallback));
 }
 
 function activeAttendanceStudentColumns() {

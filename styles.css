@@ -423,15 +423,15 @@ td.actions { white-space: nowrap; }
   margin-top: 14px;
 }
 .attendance-table {
-  min-width: 1250px;
+  min-width: 980px;
   table-layout: fixed;
   border-color: #111827;
 }
 .attendance-table th,
 .attendance-table td {
-  min-width: 104px;
-  padding: 3px;
-  font-size: 12px;
+  min-width: 0;
+  padding: 2px;
+  font-size: 11px;
   border-color: #111827;
   color: #020617;
 }
@@ -453,8 +453,8 @@ td.actions { white-space: nowrap; }
   background: var(--panel);
 }
 .attendance-table .attendance-delete-col {
-  min-width: 28px;
-  width: 28px;
+  min-width: 22px;
+  width: 22px;
   position: sticky;
   z-index: 5;
   background: var(--panel);
@@ -470,8 +470,8 @@ td.actions { white-space: nowrap; }
   background: #fee2e2;
   color: #991b1b;
   border-radius: 999px;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   padding: 0;
   font-size: 12px;
   font-weight: 900;
@@ -487,8 +487,8 @@ td.actions { white-space: nowrap; }
   text-transform: uppercase;
 }
 .attendance-table .initial-col {
-  min-width: 34px;
-  width: 34px;
+  min-width: 26px;
+  width: 26px;
   text-align: center;
   position: sticky;
   left: 126px;
@@ -507,8 +507,8 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .admission-date-col {
-  min-width: 108px;
-  width: 108px;
+  min-width: 86px;
+  width: 86px;
   text-align: center;
   position: sticky;
   left: 160px;
@@ -520,8 +520,8 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .batch-group-col {
-  min-width: 64px;
-  width: 64px;
+  min-width: 44px;
+  width: 44px;
   text-align: center;
   position: sticky;
   left: 276px;
@@ -533,8 +533,8 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .student-id-col {
-  min-width: 92px;
-  width: 92px;
+  min-width: 58px;
+  width: 58px;
   text-align: center;
   position: sticky;
   left: 340px;
@@ -546,24 +546,24 @@ td.actions { white-space: nowrap; }
   z-index: 4;
 }
 .attendance-table .lecture-col {
-  min-width: 116px;
-  width: 116px;
+  min-width: 82px;
+  width: 82px;
   text-align: center;
-  font-size: 13px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.05;
   background: #fff;
 }
 .attendance-batch-head {
-  min-width: 432px;
-  width: 432px;
+  min-width: 306px;
+  width: 306px;
   text-align: center;
   font-size: 13px;
   line-height: 1.35;
   background: #fff;
 }
 .attendance-cell {
-  min-width: 116px;
-  width: 116px;
+  min-width: 82px;
+  width: 82px;
   text-align: center;
   vertical-align: middle;
 }
@@ -593,9 +593,9 @@ td.actions { white-space: nowrap; }
   color: #b91c1c;
 }
 .attendance-status-select {
-  width: 66px;
-  min-width: 66px;
-  padding: 3px 6px;
+  width: 48px;
+  min-width: 48px;
+  padding: 2px 4px;
   border-radius: 4px;
   border: 1px solid #94a3b8;
   font-weight: 800;
@@ -614,17 +614,17 @@ td.actions { white-space: nowrap; }
   cursor: not-allowed;
 }
 .attendance-reason {
-  margin-top: 4px;
+  margin-top: 2px;
   width: 100%;
-  padding: 3px;
-  font-size: 12px;
+  padding: 2px;
+  font-size: 10px;
 }
 .attendance-name-input {
   width: 100%;
   border: 0;
   background: transparent;
-  padding: 2px;
-  font-size: 12px;
+  padding: 1px;
+  font-size: 11px;
 }
 .attendance-header-select {
   width: 100%;
@@ -636,15 +636,16 @@ td.actions { white-space: nowrap; }
   font-weight: 700;
   padding: 1px;
   margin: 0;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.1;
 }
 .attendance-header-select + .attendance-header-select {
   margin-top: 2px;
 }
 .attendance-date-label {
-  display: block;
-  font-size: 11px;
+  display: grid;
+  gap: 1px;
+  font-size: 10px;
   font-weight: 800;
 }
 .attendance-name-input:focus {
