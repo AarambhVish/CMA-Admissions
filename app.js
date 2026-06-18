@@ -285,8 +285,89 @@ async function hashPassword(password) {
 function save() {
   state.masters = masters;
   stripSensitiveData(state);
+  writeLocalSafetyBackup("save");
   localStorage.setItem(storeKey, JSON.stringify(state));
   queueCloudSave();
+}
+
+function dataScore(data = {}) {
+  const mastersCount = Object.values(data.masters || {}).reduce((sum, value) => {
+    if (Array.isArray(value)) return sum + value.length;
+    if (value && typeof value === "object") return sum + JSON.stringify(value).length / 100;
+    return sum;
+  }, 0);
+  return Math.round(
+    (data.users?.length || 0) * 8 +
+    (data.leads?.length || 0) * 5 +
+    (data.admissions?.length || 0) * 5 +
+    (data.followups?.length || 0) * 3 +
+    (data.attendanceStudents?.length || 0) * 3 +
+    (data.attendanceSessions?.length || 0) * 2 +
+    (data.campaigns?.length || 0) * 3 +
+    (data.targets?.length || 0) * 2 +
+    (data.templates?.length || 0) +
+    mastersCount
+  );
+}
+
+function writeLocalSafetyBackup(reason = "manual") {
+  const score = dataScore(state);
+  if (score <= 0) return;
+  let existingScore = 0;
+  try {
+    existingScore = JSON.parse(localStorage.getItem(`${storeKey}.backup.latest`) || "{}").score || 0;
+  } catch {}
+  if (score < existingScore) return;
+  localStorage.setItem(`${storeKey}.backup.latest`, JSON.stringify({
+    savedAt: new Date().toISOString(),
+    reason,
+    score,
+    data: stripSensitiveData(structuredClone(state))
+  }));
+}
+
+function backupBeforeReplace(reason = "replace") {
+  if (dataScore(state) > 0) {
+    localStorage.setItem(`${storeKey}.backup.beforeReplace`, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      reason,
+      score: dataScore(state),
+      data: stripSensitiveData(structuredClone(state))
+    }));
+  }
+}
+
+function hasBusinessData(data = state) {
+  return Boolean(
+    data.users?.length ||
+    data.leads?.length ||
+    data.admissions?.length ||
+    data.followups?.length ||
+    data.attendanceStudents?.length ||
+    data.attendanceSessions?.length ||
+    data.campaigns?.length ||
+    data.templates?.length
+  );
+}
+
+function restoreLocalSafetyBackup() {
+  let backup = null;
+  try {
+    backup = JSON.parse(localStorage.getItem(`${storeKey}.backup.latest`) || localStorage.getItem(`${storeKey}.backup.beforeReplace`) || "null");
+  } catch {}
+  if (!backup?.data) return alert("No local safety backup found in this browser yet.");
+  const when = backup.savedAt ? new Date(backup.savedAt).toLocaleString("en-IN") : "unknown time";
+  if (!confirm(`Restore local safety backup from ${when}? Current browser data will be replaced, but a before-restore copy will be kept.`)) return;
+  backupBeforeReplace("restore local safety backup");
+  state = backup.data;
+  normalizeStateDefaults(state);
+  masters = state.masters;
+  localStorage.setItem(storeKey, JSON.stringify(state));
+  localStorage.removeItem(`${storeKey}.currentUserId`);
+  currentUser = null;
+  loadCurrentUser();
+  render();
+  alert("Local safety backup restored. Please login again.");
 }
 
 function loadCurrentUser() {
@@ -1554,6 +1635,7 @@ function renderSettings() {
       <h2>Data Backup</h2>
       <p class="bulk-help">Restore a CRM backup only when Super Admin approves replacing the current browser data.</p>
       <div class="toolbar">
+        <button data-restore-local-backup type="button">Restore Last Local Backup</button>
         <button data-restore-data type="button">Restore Backup</button>
         <input id="restoreDataFile" class="hidden" type="file" accept="application/json,.json">
       </div>
@@ -1636,7 +1718,7 @@ function renderPaperFacultyDesigner() {
             </div>
             <form class="paper-faculty-form" data-paper-faculty-form="${escapeAttr(course)}|${escapeAttr(paper)}">
               <input name="value" placeholder="Add professor for ${escapeAttr(paper)}" ${disabled}>
-              <button class="primary" type="submit" ${disabled}>Add</button>
+              <button class="primary" type="button" data-add-paper-faculty="${escapeAttr(course)}|${escapeAttr(paper)}" ${disabled}>Add</button>
             </form>
           </div>`;
         }).join("")}
@@ -2094,6 +2176,13 @@ function saveToSheet({ silent = false, reminder = false } = {}) {
     if (!silent) setSheetStatus("Cloud sync is not configured on this device.", "error");
     return;
   }
+  if (!hasBusinessData()) {
+    if (silent || reminder) {
+      setCloudBadge("Cloud save skipped: current browser data is empty.", "error");
+      return;
+    }
+    if (!confirm("Current browser data has no users/leads/admissions. Saving now may overwrite cloud data with an empty database. Save anyway?")) return;
+  }
   if (!silent) setCloudButtonBusy("save", true);
   if (!silent) setSheetStatus(reminder ? "15-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
   const body = new URLSearchParams();
@@ -2127,9 +2216,18 @@ function loadFromSheet({ silent = false } = {}) {
   window[callbackName] = payload => {
     try {
       if (payload?.data) {
+        const incoming = payload.data;
+        normalizeStateDefaults(incoming);
+        const localScore = dataScore(state);
+        const incomingScore = dataScore(incoming);
+        if (localScore > 0 && incomingScore < Math.max(5, Math.floor(localScore * 0.35))) {
+          const message = `Cloud load blocked because cloud data looks empty/older. Local score ${localScore}, cloud score ${incomingScore}.`;
+          setSheetStatus(message, "error");
+          return;
+        }
         isCloudLoading = true;
-        state = payload.data;
-        normalizeStateDefaults(state);
+        backupBeforeReplace(silent ? "auto cloud load" : "manual cloud load");
+        state = incoming;
         masters = state.masters || masters;
         localStorage.setItem(storeKey, JSON.stringify(state));
         isCloudLoading = false;
@@ -3050,13 +3148,7 @@ function bindSettingsForms() {
   document.querySelectorAll("[data-paper-faculty-form]").forEach(form => {
     form.addEventListener("submit", e => {
       e.preventDefault();
-      if (!isSuperAdmin()) return alert("Only Super Admin can edit paper-wise professors.");
-      const [course, paper] = form.dataset.paperFacultyForm.split("|");
-      const value = titleCase(new FormData(form).get("value") || "");
-      if (!value) return;
-      addPaperFaculty(course, paper, value);
-      save();
-      render();
+      savePaperFacultyFromForm(form);
     });
   });
   document.getElementById("settingsUserForm")?.addEventListener("submit", saveUser);
@@ -3090,6 +3182,21 @@ function addPaperFaculty(course, paper, name) {
   masters.paperFaculty[courseName] = masters.paperFaculty[courseName] || {};
   masters.paperFaculty[courseName][paper] = masters.paperFaculty[courseName][paper] || [];
   addUnique(masters.paperFaculty[courseName][paper], name);
+}
+
+function savePaperFacultyFromForm(form) {
+  if (!isSuperAdmin()) return alert("Only Super Admin can edit paper-wise professors.");
+  if (!form) return;
+  const [course, paper] = form.dataset.paperFacultyForm.split("|");
+  const input = form.elements.value;
+  const value = titleCase(input?.value || "");
+  if (!value) {
+    input?.focus();
+    return;
+  }
+  addPaperFaculty(course, paper, value);
+  save();
+  render();
 }
 
 function deletePaperFaculty(payload) {
@@ -4279,6 +4386,7 @@ function routeActions(e) {
     deleteMasterValue(key, Number(index));
   }
   if (button.dataset.deletePaperFaculty) deletePaperFaculty(button.dataset.deletePaperFaculty);
+  if (button.dataset.addPaperFaculty) savePaperFacultyFromForm(button.closest("[data-paper-faculty-form]"));
   if (button.dataset.addSuggestion) {
     const separator = button.dataset.addSuggestion.indexOf(":");
     const key = button.dataset.addSuggestion.slice(0, separator);
@@ -4305,6 +4413,7 @@ function routeActions(e) {
   if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
   if (button.dataset.saveToSheet !== undefined) saveToSheet();
+  if (button.dataset.restoreLocalBackup !== undefined) restoreLocalSafetyBackup();
   if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
   if (button.dataset.updateAdmissionSheet !== undefined) updateFromAdmissionGoogleSheet();
   if (button.dataset.syncLeadsAdmissions !== undefined) syncLeadsAndAdmissions();
