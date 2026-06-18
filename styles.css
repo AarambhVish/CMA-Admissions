@@ -134,6 +134,14 @@ body {
   white-space: nowrap;
 }
 .locked-action { color: var(--muted); font-size: 12px; }
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.row-actions button {
+  padding: 7px 9px;
+}
 
 .sidebar {
   width: 270px;

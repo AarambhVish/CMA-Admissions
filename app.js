@@ -54,6 +54,8 @@ const defaultMasters = {
   batches: ["Morning Batch", "Evening Batch", "Weekend Batch"],
   attendanceBatches: ["CMAF_D26_Borivali", "CMAI_D26_Borivali"],
   professors: ["Pradeep Sir", "Radhika Miss"],
+  foundationFaculty: ["Pradeep Sir", "Radhika Miss"],
+  interFaculty: ["Pradeep Sir", "Sumit Sir"],
   attendanceRemarks: ["Fever / Health Issue", "College / Exam", "Family Reason", "Out of Station", "Not Responding", "Will Attend Next Lecture", "Other"]
 };
 
@@ -127,7 +129,7 @@ const seed = {
   roleTabAccess: structuredClone(defaultRoleTabAccess),
   customAttendanceFields: [],
   customLeadFields: [],
-  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
+  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), foundationFaculty: structuredClone(defaultMasters.foundationFaculty), interFaculty: structuredClone(defaultMasters.interFaculty), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
 };
 
 let state = load();
@@ -184,6 +186,8 @@ function normalizeStateDefaults(data) {
     batches: data.masters?.batches || [],
     attendanceBatches: data.masters?.attendanceBatches || structuredClone(defaultMasters.attendanceBatches),
     professors: data.masters?.professors || structuredClone(defaultMasters.professors),
+    foundationFaculty: data.masters?.foundationFaculty || data.masters?.professors || structuredClone(defaultMasters.foundationFaculty),
+    interFaculty: data.masters?.interFaculty || data.masters?.professors || structuredClone(defaultMasters.interFaculty),
     attendanceRemarks: data.masters?.attendanceRemarks || structuredClone(defaultMasters.attendanceRemarks)
   };
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
@@ -1000,7 +1004,7 @@ function prepareAttendanceForms() {
   if (sessionForm) {
     if (sessionForm.elements.batch) sessionForm.elements.batch.innerHTML = batchOptions;
     if (sessionForm.elements.subject) sessionForm.elements.subject.innerHTML = attendancePaperOptions(selectedAttendanceBatch() || sessionForm.elements.batch?.value || "").map(paper => `<option>${escapeHtml(paper)}</option>`).join("");
-    if (sessionForm.elements.prof) sessionForm.elements.prof.innerHTML = masters.professors.map(prof => `<option>${escapeHtml(prof)}</option>`).join("");
+    if (sessionForm.elements.prof) sessionForm.elements.prof.innerHTML = attendanceFacultyOptions(selectedAttendanceBatch() || sessionForm.elements.batch?.value || "").map(prof => `<option>${escapeHtml(prof)}</option>`).join("");
     const helper = sessionForm.querySelector("[data-attendance-branch-note]");
     if (helper) helper.textContent = canManageAllAttendance() ? "Lecture column applies to the selected attendance batch." : `Lecture column will be managed for ${adminBranch || "your branch"}.`;
   }
@@ -1020,6 +1024,18 @@ function attendancePaperOptions(batchName = "") {
   if (lower.includes("cmai") || lower.includes("inter")) return ["P5", "P6", "P7", "P8"];
   if (lower.includes("final")) return ["P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20"];
   return ["P1", "P2", "P3", "P4"];
+}
+
+function attendanceFacultyMasterKey(batchName = "") {
+  const lower = String(batchName || "").toLowerCase();
+  if (lower.includes("cmai") || lower.includes("inter")) return "interFaculty";
+  return "foundationFaculty";
+}
+
+function attendanceFacultyOptions(batchName = "", current = "") {
+  const key = attendanceFacultyMasterKey(batchName);
+  const list = [...new Set([...(masters[key] || []), ...(masters.professors || [])].filter(Boolean))];
+  return current && !list.includes(current) ? [current, ...list] : list;
 }
 
 function selectedAttendanceBatch() {
@@ -1088,11 +1104,15 @@ function attendanceSessionTitle(session) {
   const subject = session.subject || "";
   const prof = session.prof || "";
   const paperOptions = subject && !papers.includes(subject) ? [subject, ...papers] : papers;
+  const facultyOptions = attendanceFacultyOptions(session.batch || selectedAttendanceBatch(), prof);
   return `<select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "subject", date: session.date, batch: session.batch, branch: session.branch })}">
       <option value="">Paper</option>
       ${paperOptions.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
     </select>
-    <input class="attendance-header-select" list="attendanceProfessorList" value="${escapeAttr(prof)}" placeholder="Professor" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">`;
+    <select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">
+      <option value="">Professor</option>
+      ${facultyOptions.map(name => `<option value="${escapeAttr(name)}" ${name === prof ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
+    </select>`;
 }
 
 function attendanceSessionDateTitle(session) {
@@ -1166,7 +1186,7 @@ function remapAttendanceSessionId(oldId, newId) {
 function renderAttendanceGrid(sections) {
   const target = document.getElementById("attendanceGrid");
   if (!target) return;
-  target.innerHTML = `<datalist id="attendanceProfessorList">${masters.professors.map(name => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>${sections.map(section => renderAttendanceTable(section)).join("")}`;
+  target.innerHTML = sections.map(section => renderAttendanceTable(section)).join("");
 }
 
 function renderAttendanceTable({ batch, branch, students, sessions }) {
@@ -1439,7 +1459,7 @@ function renderUsers() {
     userBranchLabel(u),
     userAccessLabel(u),
     "First name / mobile / email",
-    isSuperAdmin() ? `<button data-edit-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
+    isSuperAdmin() ? `<div class="row-actions"><button data-edit-user="${u.id}">Edit</button><button data-delete-user="${u.id}" type="button">Delete</button></div>` : "<span class='locked-action'>Super Admin only</span>"
   ]);
 }
 
@@ -1450,7 +1470,7 @@ function renderSettingsUsers() {
     userBranchLabel(u),
     userAccessLabel(u),
     "First name / mobile / email",
-    isSuperAdmin() ? `<button data-edit-settings-user="${u.id}">Edit</button>` : "<span class='locked-action'>Super Admin only</span>"
+    isSuperAdmin() ? `<div class="row-actions"><button data-edit-settings-user="${u.id}">Edit</button><button data-delete-user="${u.id}" type="button">Delete</button></div>` : "<span class='locked-action'>Super Admin only</span>"
   ]);
 }
 
@@ -1462,7 +1482,8 @@ function renderSettings() {
     ["roles", "Roles"],
     ["batches", "Batches"],
     ["attendanceBatches", "Attendance Batches"],
-    ["professors", "Professors"],
+    ["foundationFaculty", "Foundation Faculty"],
+    ["interFaculty", "Inter Faculty"],
     ["attendanceRemarks", "Attendance Absent Remarks"]
   ];
   document.getElementById("settingsGrid").innerHTML = `
@@ -3502,6 +3523,7 @@ function saveAttendanceSession(e) {
     createdAt: new Date().toISOString(),
     createdBy: currentUser?.name || ""
   });
+  addUnique(masters[attendanceFacultyMasterKey(data.batch)], titleCase(data.prof || ""));
   save();
   e.target.reset();
   render();
@@ -3576,7 +3598,7 @@ async function importPlannerTimetableForAttendance() {
       };
       addUnique(masters.attendanceBatches, session.batch);
       if (branch !== "Unassigned") addUnique(masters.branches, branch);
-      if (session.prof) addUnique(masters.professors, session.prof);
+      if (session.prof) addUnique(masters[attendanceFacultyMasterKey(session.batch)], session.prof);
       const existing = state.attendanceSessions.find(item => item.plannerSlotId === slot.id)
         || state.attendanceSessions.find(item => item.batch === session.batch && item.date === session.date && item.plannerSlotId === undefined && item.subject === session.subject);
       if (existing) {
@@ -3832,6 +3854,21 @@ function editSettingsUser(userId) {
   setMultiSelectValues(form.elements.branchAccess, userBranchList(user));
   renderUserTabAccess("settingsUserTabAccess", user);
   form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function deleteUser(userId) {
+  if (!isSuperAdmin()) return alert("Only Super Admin can delete users.");
+  const user = state.users.find(u => u.id === userId);
+  if (!user) return;
+  if (currentUser?.id === userId) return alert("You cannot delete the user you are currently logged in as.");
+  const superAdmins = state.users.filter(item => isSuperAdminUser(item));
+  if (isSuperAdminUser(user) && superAdmins.length <= 1) return alert("At least one Super Admin must remain.");
+  if (!confirm(`Delete user "${user.name}"? Existing leads and admission records will keep their history.`)) return;
+  state.users = state.users.filter(item => item.id !== userId);
+  save();
+  clearUserForm("userForm");
+  clearUserForm("settingsUserForm");
+  render();
 }
 
 function clearUserForm(formId) {
@@ -4220,6 +4257,7 @@ function routeActions(e) {
   if (button.dataset.clearUserForm) clearUserForm(button.dataset.clearUserForm);
   if (button.dataset.editUser) editUser(button.dataset.editUser);
   if (button.dataset.editSettingsUser) editSettingsUser(button.dataset.editSettingsUser);
+  if (button.dataset.deleteUser) deleteUser(button.dataset.deleteUser);
   if (button.dataset.applyTags) applyLineTags(Number(button.dataset.applyTags));
   if (button.dataset.editMaster) {
     const [key, index] = button.dataset.editMaster.split(":");
@@ -4399,7 +4437,7 @@ function updateAttendanceSessionField(encoded, value) {
     prof: current.prof || ""
   };
   updates[field] = field === "prof" ? titleCase(value || "") : value;
-  if (field === "prof" && updates[field]) addUnique(masters.professors, updates[field]);
+  if (field === "prof" && updates[field]) addUnique(masters[attendanceFacultyMasterKey(batch)], updates[field]);
   ensureAttendanceSession(sessionId, updates);
   save();
   renderAttendance();
