@@ -1,6 +1,7 @@
 const storeKey = "cmaAdmissionCrm.v1";
 const fixedSheetWebAppUrl = "";
 const fixedDatabaseSpreadsheetUrl = "";
+const plannerCloudSyncUrl = "https://script.google.com/macros/s/AKfycbw1FsCcB8Dd3ydpazVSCOZx0qUwrHanZdP4woDRc4z4VVFp1dagHPFetp_YKU2a7OdirA/exec";
 const cloudReminderMinutes = 15;
 const tabs = [
   ["dashboard", "Dashboard"],
@@ -489,6 +490,7 @@ function bindEvents() {
   document.getElementById("attendanceStudentForm").addEventListener("submit", saveAttendanceStudent);
   document.getElementById("attendanceSessionForm").addEventListener("submit", saveAttendanceSession);
   document.getElementById("addAttendanceBulk")?.addEventListener("click", addBulkAttendanceStudents);
+  document.getElementById("importPlannerTimetable")?.addEventListener("click", importPlannerTimetableForAttendance);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
   document.getElementById("targetPlanForm").addEventListener("submit", saveTargetPlan);
   document.getElementById("campaignForm").addEventListener("submit", saveCampaign);
@@ -940,6 +942,9 @@ function attendanceStudentMatchesStatus(student, sessions, statusFilter) {
 }
 
 function attendanceBatchLocation(batchName = "") {
+  const existing = state.attendanceSessions.find(session => session.batch === batchName && session.branch)?.branch
+    || state.attendanceStudents.find(student => student.batch === batchName && student.branch)?.branch;
+  if (existing) return existing;
   const parts = String(batchName || "").split("_").filter(Boolean);
   return parts.length >= 3 ? parts.slice(2).join(" ") : "";
 }
@@ -1037,9 +1042,10 @@ function attendanceSessionTitle(session) {
   const papers = attendancePaperOptions(session.batch || selectedAttendanceBatch());
   const subject = session.subject || "";
   const prof = session.prof || "";
+  const paperOptions = subject && !papers.includes(subject) ? [subject, ...papers] : papers;
   return `<select class="attendance-header-select" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "subject", date: session.date, batch: session.batch, branch: session.branch })}">
       <option value="">Paper</option>
-      ${papers.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
+      ${paperOptions.map(paper => `<option ${paper === subject ? "selected" : ""}>${escapeHtml(paper)}</option>`).join("")}
     </select>
     <input class="attendance-header-select" list="attendanceProfessorList" value="${escapeAttr(prof)}" placeholder="Professor" data-attendance-session-field="${attendancePayload({ sessionId: session.id, field: "prof", date: session.date, batch: session.batch, branch: session.branch })}">`;
 }
@@ -3369,6 +3375,105 @@ function saveAttendanceSession(e) {
   save();
   e.target.reset();
   render();
+}
+
+function loadPlannerCloudData(timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `crmPlannerLoad_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    let timeoutId;
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      script.remove();
+    };
+    window[callbackName] = response => {
+      cleanup();
+      resolve(response);
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Could not load timetable planner cloud data."));
+    };
+    script.src = `${plannerCloudSyncUrl}?action=load&callback=${encodeURIComponent(callbackName)}&_=${Date.now()}`;
+    document.body.appendChild(script);
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timetable planner cloud did not respond."));
+    }, timeoutMs);
+  });
+}
+
+async function importPlannerTimetableForAttendance() {
+  const button = document.getElementById("importPlannerTimetable");
+  const original = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Loading Timetable...";
+  }
+  try {
+    const response = await loadPlannerCloudData();
+    const planner = response?.data;
+    if (!response?.ok || !planner) throw new Error(response?.error || "No timetable data found. Open timetable software and press Cloud Save once.");
+    const start = selectedAttendanceStartDate();
+    const end = addDaysISO(start, 6);
+    const batchMap = new Map((planner.batches || []).map(batch => [batch.id, batch]));
+    const professorMap = new Map((planner.professors || []).map(prof => [prof.id, prof.name]));
+    const slots = (planner.slots || []).filter(slot => slot.date >= start && slot.date <= end && !slot.noLecture);
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    slots.forEach(slot => {
+      const batch = batchMap.get(slot.batchId);
+      if (!batch?.name || !slot.date) {
+        skipped++;
+        return;
+      }
+      const branch = batch.centre || attendanceBatchLocation(batch.name) || "Unassigned";
+      if (!canManageAttendanceBranch(branch)) {
+        skipped++;
+        return;
+      }
+      const session = {
+        batch: batch.name,
+        branch,
+        date: slot.date,
+        subject: slot.subject || batch.paper || "",
+        prof: professorMap.get(slot.professorId) || slot.professorName || "",
+        plannerSlotId: slot.id,
+        source: "CMA Mumbai Planner",
+        updatedAt: new Date().toISOString()
+      };
+      addUnique(masters.attendanceBatches, session.batch);
+      if (branch !== "Unassigned") addUnique(masters.branches, branch);
+      if (session.prof) addUnique(masters.professors, session.prof);
+      const existing = state.attendanceSessions.find(item => item.plannerSlotId === slot.id)
+        || state.attendanceSessions.find(item => item.batch === session.batch && item.date === session.date && item.plannerSlotId === undefined && item.subject === session.subject);
+      if (existing) {
+        Object.assign(existing, session);
+        updated++;
+      } else {
+        state.attendanceSessions.push({ id: id(), ...session, createdAt: new Date().toISOString(), createdBy: currentUser?.name || "" });
+        added++;
+      }
+    });
+    save();
+    render();
+    alert(`Timetable imported for ${formatAttendanceDate(start)} to ${formatAttendanceDate(end)}.\nAdded: ${added}\nUpdated: ${updated}\nSkipped: ${skipped}`);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+}
+
+function addDaysISO(value, days) {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function archiveAttendanceStudent(studentId) {
