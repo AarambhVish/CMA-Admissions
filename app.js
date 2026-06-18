@@ -1,7 +1,7 @@
 const storeKey = "cmaAdmissionCrm.v1";
 const fixedSheetWebAppUrl = "";
 const fixedDatabaseSpreadsheetUrl = "";
-const cloudReminderMinutes = 10;
+const cloudReminderMinutes = 15;
 const tabs = [
   ["dashboard", "Dashboard"],
   ["leads", "Leads"],
@@ -163,14 +163,6 @@ function normalizeStateDefaults(data) {
   data.attendanceStudents = data.attendanceStudents || [];
   data.attendanceSessions = data.attendanceSessions || [];
   data.attendanceRecords = data.attendanceRecords || {};
-  if (!data.attendanceRegisterResetV3) {
-    data.attendanceStudents = [];
-    data.attendanceSessions = [];
-    data.attendanceRecords = {};
-    data.attendanceStudentsClearedForHeaderImport = true;
-    data.attendanceStudentsClearedForHeaderImportV2 = true;
-    data.attendanceRegisterResetV3 = true;
-  }
   data.campaigns = data.campaigns || [];
   data.users = data.users || [];
   data.templates = data.templates || [];
@@ -1827,7 +1819,7 @@ function startPeriodicSheetSync() {
   periodicSyncTimer = setInterval(() => {
     const settings = getSheetSyncSettings();
     if (settings.auto && settings.url && !isCloudLoading) {
-      setSheetStatus("10-minute cloud reminder: saving latest CRM data...", "busy");
+      setSheetStatus("15-minute cloud reminder: saving latest CRM data...", "busy");
       saveToSheet({ silent: false, reminder: true });
     }
   }, cloudReminderMinutes * 60 * 1000);
@@ -1840,7 +1832,7 @@ function saveToSheet({ silent = false, reminder = false } = {}) {
     return;
   }
   if (!silent) setCloudButtonBusy("save", true);
-  if (!silent) setSheetStatus(reminder ? "10-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
+  if (!silent) setSheetStatus(reminder ? "15-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
   const body = new URLSearchParams();
   body.set("mode", "save");
   if (settings.token) body.set("token", settings.token);
@@ -1848,7 +1840,7 @@ function saveToSheet({ silent = false, reminder = false } = {}) {
   fetch(settings.url, { method: "POST", mode: "no-cors", body })
     .then(() => {
       localStorage.setItem(`${storeKey}.lastCloudSave`, new Date().toISOString());
-      if (!silent) setSheetStatus(reminder ? "Cloud saved. Next reminder/save will run in 10 minutes." : "Saved to Google Sheet.", "ok");
+      if (!silent) setSheetStatus(reminder ? "Cloud saved. Next reminder/save will run in 15 minutes." : "Saved to Google Sheet.", "ok");
       if (silent) updateCloudBadgeFromLastSave();
     })
     .catch(() => {
