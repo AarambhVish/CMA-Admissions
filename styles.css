@@ -258,6 +258,29 @@ textarea { width: 100%; resize: vertical; }
   display: grid; grid-template-columns: repeat(6, minmax(135px, 1fr));
   gap: 10px; margin: 14px 0;
 }
+#attendanceFilters {
+  grid-template-columns: minmax(170px, 1.2fr) minmax(135px, .9fr) minmax(150px, .85fr) minmax(150px, .85fr) 42px;
+  gap: 6px;
+  margin: 6px 0 8px;
+  align-items: stretch;
+}
+#attendanceFilters select,
+#attendanceFilters input,
+#attendanceFilters button {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.attendance-filter-apply {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 900;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
 
 .table-wrap { overflow: auto; }
 #leadTable,
@@ -362,18 +385,18 @@ td.actions { white-space: nowrap; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 0 10px;
+  min-height: 34px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--muted);
 }
 .attendance-start-label input {
   border: 0;
-  min-width: 138px;
+  min-width: 112px;
   padding: 0;
   font-weight: 700;
   color: var(--text);
@@ -420,6 +443,34 @@ td.actions { white-space: nowrap; }
   position: sticky;
   z-index: 3;
   background: var(--panel);
+}
+.attendance-table .attendance-delete-col {
+  min-width: 28px;
+  width: 28px;
+  position: sticky;
+  z-index: 5;
+  background: var(--panel);
+  text-align: center;
+  padding: 2px;
+}
+.attendance-table th.attendance-delete-col {
+  background: #f8fafc;
+  z-index: 6;
+}
+.attendance-row-delete {
+  border: 0;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 999px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+.attendance-row-delete:hover {
+  background: #fecaca;
 }
 .attendance-table th.attendance-info-col {
   background: #f8fafc;

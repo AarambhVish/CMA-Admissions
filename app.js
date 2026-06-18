@@ -56,9 +56,32 @@ const defaultMasters = {
   foundationFaculty: ["Pradeep Sir", "Radhika Miss"],
   interFaculty: ["Pradeep Sir", "Sumit Sir"],
   paperFaculty: {
-    "CMA Foundation": { P1: ["Pradeep Sir"], P2: [], P3: [], P4: ["Radhika Miss"] },
-    "CMA Intermediate": { P5: ["Pradeep Sir"], P6: ["Sumit Sir"], P7: [], P8: [] },
-    "CMA Final": { P13: [], P14: [], P15: [], P16: [], P17: [], P18: [], P19: [], P20: [] }
+    "CMA Foundation": {
+      P1: ["Prof. Radhika Mane", "Prof. Chirag Jain", "Prof. Rahul Bhuvad"],
+      P2: ["Prof. Dilip Vishwakarma", "Prof. Sandesh Gupta", "Prof. Pradeep Yadav", "Prof. Yasin Pradhan", "Prof. Tushar Desai", "Prof. Nishikant Sathe"],
+      P3: ["Prof. Sandesh Gupta", "Prof. Sumit Redekar", "Prof. Raina Thakkar", "Prof. Manisha Lath", "Prof. Ravi Patel"],
+      P4: ["Prof. Payal Parekh", "Prof. SP Shukla", "Prof. Chirag Jain", "Prof. Rahul Bhuvad", "Prof. Rakesh Aswani", "Prof. Ruchi Chaurasia", "Prof. Sandeep Kanaujiya"]
+    },
+    "CMA Intermediate": {
+      P5: ["Prof. Radhika Mane", "Prof. Chirag Jain"],
+      P6: ["Prof. Sandesh Gupta", "Prof. Pradeep Yadav", "Prof. Yasin Pradhan", "Prof. Tushar Desai", "Prof. Nishikant Sathe"],
+      P7: ["Prof. Gaorav Tawari", "Prof. Jeet Shah", "Prof. Parag Shah", "Prof. Yash Mundhra"],
+      P8: ["Prof. Dilip Vishwakarma", "Prof. Sandesh Gupta", "Prof. Nitin Shrivastav", "Prof. Jignesh Sangani"],
+      P9: ["Prof. Sumit Redekar"],
+      P10: ["Prof. Sandesh Gupta", "Prof. Gaorav Tawari", "Prof. Nitin Shrivastav", "Prof. Yasin Pradhan", "Prof. Tushar Desai"],
+      P11: ["Prof. Dilip Vishwakarma", "Prof. Sandesh Gupta", "Prof. Nitin Shrivastav", "Prof. Jeet Shah", "Prof. Jigar Joshi", "Prof. Yasin Pradhan", "Prof. Tushar Desai"],
+      P12: ["Prof. Dilip Vishwakarma", "Prof. Sandesh Gupta", "Prof. Radhika Mane", "Prof. Nitin Shrivastav", "Prof. Jignesh Sangani", "Prof. Rahul Bhuvad"]
+    },
+    "CMA Final": {
+      P13: [],
+      P14: [],
+      P15: ["Prof. Gaorav Tawari"],
+      P16: ["Prof. Dilip Vishwakarma", "Prof. Sumit Redekar", "Prof. Jignesh Sangani"],
+      P17: ["Prof. Gaorav Tawari"],
+      P18: ["Prof. Dilip Vishwakarma", "Prof. Gaorav Tawari", "Prof. Jignesh Sangani"],
+      P19: ["Prof. Jeet Shah"],
+      P20: ["Prof. Dilip Vishwakarma"]
+    }
   },
   attendanceRemarks: ["Fever / Health Issue", "College / Exam", "Family Reason", "Out of Station", "Not Responding", "Will Attend Next Lecture", "Other"]
 };
@@ -131,6 +154,7 @@ const seed = {
   leadColumns: structuredClone(defaultLeadColumns),
   attendanceStudentColumns: structuredClone(defaultAttendanceStudentColumns),
   roleTabAccess: structuredClone(defaultRoleTabAccess),
+  professorDatabaseSeeded: true,
   customAttendanceFields: [],
   customLeadFields: [],
   masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), foundationFaculty: structuredClone(defaultMasters.foundationFaculty), interFaculty: structuredClone(defaultMasters.interFaculty), paperFaculty: structuredClone(defaultMasters.paperFaculty), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
@@ -162,6 +186,7 @@ function load() {
   }
   const loaded = JSON.parse(raw);
   normalizeStateDefaults(loaded);
+  localStorage.setItem(storeKey, JSON.stringify(loaded));
   if (!loaded.planningSeeded) {
     ensureProvidedPlanning(loaded);
     loaded.planningSeeded = true;
@@ -195,6 +220,10 @@ function normalizeStateDefaults(data) {
     paperFaculty: normalizePaperFaculty(data.masters?.paperFaculty, data.masters),
     attendanceRemarks: data.masters?.attendanceRemarks || structuredClone(defaultMasters.attendanceRemarks)
   };
+  if (!data.professorDatabaseSeeded) {
+    mergePaperFaculty(data.masters.paperFaculty, defaultMasters.paperFaculty);
+    data.professorDatabaseSeeded = true;
+  }
   data.leadColumns = Array.isArray(data.leadColumns) && data.leadColumns.length ? data.leadColumns : structuredClone(defaultLeadColumns);
   data.attendanceStudentColumns = Array.isArray(data.attendanceStudentColumns) && data.attendanceStudentColumns.length ? data.attendanceStudentColumns : structuredClone(defaultAttendanceStudentColumns);
   data.roleTabAccess = normalizeRoleTabAccess(data.roleTabAccess, data.masters.roles);
@@ -242,7 +271,7 @@ function normalizeRoleTabAccess(roleAccess = {}, roleNames = null) {
 }
 
 function normalizePaperFaculty(existing = null, oldMasters = {}) {
-  const normalized = structuredClone(defaultMasters.paperFaculty);
+  const normalized = existing ? structuredClone(existing) : structuredClone(defaultMasters.paperFaculty);
   const legacyFoundation = oldMasters?.foundationFaculty || oldMasters?.professors || [];
   const legacyInter = oldMasters?.interFaculty || oldMasters?.professors || [];
   Object.entries(existing || {}).forEach(([course, papers]) => {
@@ -262,6 +291,18 @@ function normalizePaperFaculty(existing = null, oldMasters = {}) {
     paperOptionsForCourse(courseName).forEach(paper => normalized[courseName][paper] = normalized[courseName][paper] || []);
   });
   return normalized;
+}
+
+function mergePaperFaculty(target = {}, source = {}) {
+  Object.entries(source).forEach(([course, papers]) => {
+    const courseName = canonicalCourseName(course);
+    target[courseName] = target[courseName] || {};
+    Object.entries(papers || {}).forEach(([paper, names]) => {
+      target[courseName][paper] = target[courseName][paper] || [];
+      (names || []).forEach(name => addUnique(target[courseName][paper], name));
+    });
+  });
+  return target;
 }
 
 function canonicalCourseName(course = "") {
@@ -732,6 +773,10 @@ function archivedLeads() {
   return state.leads.filter(l => l.archivedAt);
 }
 
+function archivedAttendanceStudents() {
+  return state.attendanceStudents.filter(student => student.archivedAt);
+}
+
 function accessibleTabs(user = currentUser) {
   if (!user || isSuperAdminUser(user)) return tabs;
   const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(user.role);
@@ -925,6 +970,20 @@ function renderArchive() {
     l.archivedBy || "Admin",
     `<button data-restore-lead="${l.id}">Restore</button> <button data-permanent-delete="${l.id}" class="danger-btn">Permanent Delete</button>`
   ]);
+  renderAttendanceArchive();
+}
+
+function renderAttendanceArchive() {
+  const target = document.getElementById("attendanceArchiveTable");
+  if (!target) return;
+  table("attendanceArchiveTable", archivedAttendanceStudents(), ["Student", "Batch", "Branch", "Archived on", "Archived by", "Actions"], student => [
+    `${escapeHtml(student.firstName || "")} ${escapeHtml(student.lastName || student.lastInitial || "")}`,
+    escapeHtml(student.batch || ""),
+    escapeHtml(student.branch || ""),
+    formatDate(student.archivedAt),
+    escapeHtml(student.archivedBy || ""),
+    `<button data-restore-attendance-student="${student.id}">Restore</button> ${isSuperAdmin() ? `<button data-permanent-delete-attendance-student="${student.id}" class="danger-btn">Permanent Delete</button>` : "<span class='locked-action'>Super Admin only</span>"}`
+  ]);
 }
 
 function renderFollowups() {
@@ -944,7 +1003,7 @@ function renderAttendance() {
   prepareAttendanceForms();
   renderAttendanceFilters();
   const selectedBatch = selectedAttendanceBatch();
-  const selectedBranch = selectedBatch ? document.getElementById("attendance-branch")?.value || "" : "";
+  const selectedBranch = document.getElementById("attendance-branch")?.value || "";
   const statusFilter = selectedAttendanceStatusFilter();
   const batchGroupFilter = selectedAttendanceBatchGroupFilter();
   const sortField = selectedAttendanceSortField();
@@ -973,43 +1032,19 @@ function renderAttendanceFilters() {
   const fallbackStartDate = attendanceDefaultStartDate(currentBatch);
   const currentStartDate = document.getElementById("attendance-from-date")?.value || fallbackStartDate;
   const currentEndDate = document.getElementById("attendance-to-date")?.value || addDaysISO(currentStartDate, 6);
-  const currentStatus = document.getElementById("attendance-status-filter")?.value || "";
-  const currentBatchGroup = document.getElementById("attendance-batch-group-filter")?.value || "";
-  const currentSort = document.getElementById("attendance-sort")?.value || "firstName";
-  const currentSortDir = document.getElementById("attendance-sort-dir")?.value || "asc";
   const branchOptions = [...new Set([...attendanceBranchChoices(), attendanceBatchLocation(currentBatch)].filter(Boolean))];
   const adminBranch = attendanceAdminBranch();
   const currentBranch = canManageAllAttendance()
-    ? currentBatch ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || "" : ""
+    ? attendanceBatchLocation(currentBatch) || document.getElementById("attendance-branch")?.value || ""
     : adminBranch;
   const batchChoices = attendanceBatchChoices();
   el.innerHTML = [
     `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
     `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`,
-    `<select id="attendance-batch-group-filter">
-      <option value="">All Batch A/B</option>
-      <option value="A" ${currentBatchGroup === "A" ? "selected" : ""}>Batch A</option>
-      <option value="B" ${currentBatchGroup === "B" ? "selected" : ""}>Batch B</option>
-    </select>`,
-    `<select id="attendance-sort">
-      ${attendanceSortOptions().map(option => `<option value="${escapeAttr(option.key)}" ${option.key === currentSort ? "selected" : ""}>Sort: ${escapeHtml(option.label)}</option>`).join("")}
-    </select>`,
-    `<select id="attendance-sort-dir">
-      <option value="asc" ${currentSortDir === "asc" ? "selected" : ""}>A to Z / Old First</option>
-      <option value="desc" ${currentSortDir === "desc" ? "selected" : ""}>Z to A / New First</option>
-    </select>`,
     `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`,
     `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`,
-    `<select id="attendance-status-filter">
-      <option value="">All P / A</option>
-      <option value="present" ${currentStatus === "present" ? "selected" : ""}>Only P</option>
-      <option value="absent" ${currentStatus === "absent" ? "selected" : ""}>Only A</option>
-    </select>`
+    `<button class="attendance-filter-apply" data-apply-attendance-filters type="button" title="Apply attendance filters">→</button>`
   ].join("");
-  if (!el.dataset.ready) {
-    el.dataset.ready = "1";
-    el.addEventListener("change", renderAttendance);
-  }
 }
 
 function selectedAttendanceStatusFilter() {
@@ -1158,7 +1193,7 @@ function attendancePaperOptions(batchName = "") {
 
 function paperOptionsForCourse(course = "") {
   const lower = String(course || "").toLowerCase();
-  if (lower.includes("inter") || lower.includes("cmai")) return ["P5", "P6", "P7", "P8"];
+  if (lower.includes("inter") || lower.includes("cmai")) return ["P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12"];
   if (lower.includes("final")) return ["P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20"];
   return ["P1", "P2", "P3", "P4"];
 }
@@ -1332,6 +1367,7 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   const branchTitle = branch || attendanceBatchLocation(batch) || "All Branches";
   const infoColumns = activeAttendanceStudentColumns();
   const infoWidth = infoColumns.reduce((sum, column) => sum + attendanceColumnWidth(column), 0);
+  const deleteWidth = 28;
   const subjectHeaders = sessions.length
     ? sessions.map(session => `<th class="lecture-col">${attendanceSessionTitle(session)}</th>`).join("")
     : `<th class="lecture-col empty-lecture">&lt;Add lecture&gt;</th>`;
@@ -1343,15 +1379,18 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
   <table class="attendance-table">
     <thead>
       <tr>
-        <th class="attendance-batch-head" colspan="${infoColumns.length}" style="min-width:${infoWidth}px;width:${infoWidth}px;">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
+        <th class="attendance-delete-col attendance-batch-head" style="min-width:${deleteWidth}px;width:${deleteWidth}px;left:0;"></th>
+        <th class="attendance-batch-head" colspan="${infoColumns.length}" style="min-width:${infoWidth}px;width:${infoWidth}px;left:${deleteWidth}px;">${escapeHtml(batchTitle)}<br>${escapeHtml(branchTitle)}</th>
         ${subjectHeaders}
       </tr>
       <tr>
+        <th class="attendance-delete-col" style="left:0;"></th>
         ${infoColumns.map((column, index) => attendanceInfoHeaderCell(column, index, infoColumns)).join("")}
         ${dateHeaders}
       </tr>
     </thead>
     <tbody>${students.map(student => `<tr>
+      <td class="attendance-delete-col" style="left:0;"><button class="attendance-row-delete" data-archive-attendance-student="${student.id}" type="button" title="Archive student">x</button></td>
       ${infoColumns.map((column, index) => attendanceInfoDataCell(column, index, infoColumns, attendanceStudentFieldCell(student, column.key))).join("")}
       ${sessions.length ? sessions.map(session => attendanceCell(student, session)).join("") : `<td class="attendance-cell empty-lecture"></td>`}
     </tr>`).join("")}${manualRows.join("")}</tbody>
@@ -1362,6 +1401,7 @@ function renderAttendanceTable({ batch, branch, students, sessions }) {
 function renderManualAttendanceRow(index, sessions, batch, branch) {
   const infoColumns = activeAttendanceStudentColumns();
   return `<tr>
+    <td class="attendance-delete-col" style="left:0;"></td>
     ${infoColumns.map((column, columnIndex) => attendanceInfoDataCell(column, columnIndex, infoColumns, manualAttendanceFieldControl(index, column, batch, branch))).join("")}
     ${sessions.map(() => `<td class="attendance-cell empty-lecture">${disabledAttendanceSelect()}</td>`).join("")}
   </tr>`;
@@ -1376,7 +1416,7 @@ function attendanceInfoDataCell(column, index, columns, content) {
 }
 
 function attendanceInfoColumnStyle(column, index, columns) {
-  const left = columns.slice(0, index).reduce((sum, item) => sum + attendanceColumnWidth(item), 0);
+  const left = 28 + columns.slice(0, index).reduce((sum, item) => sum + attendanceColumnWidth(item), 0);
   const width = attendanceColumnWidth(column);
   return `min-width:${width}px;width:${width}px;left:${left}px;`;
 }
@@ -3766,9 +3806,32 @@ function archiveAttendanceStudent(studentId) {
   const student = state.attendanceStudents.find(item => item.id === studentId);
   if (!student) return;
   if (!canManageAttendanceBranch(student.branch || "Unassigned")) return alert("You can archive attendance students only for your branch.");
-  if (!confirm(`Archive ${student.firstName} ${student.lastInitial}. from attendance?`)) return;
+  if (!confirm(`Delete/archive ${student.firstName} ${student.lastName || student.lastInitial || ""} from attendance register? It can be restored from Archive.`)) return;
   student.archivedAt = new Date().toISOString();
   student.archivedBy = currentUser?.name || "";
+  save();
+  render();
+}
+
+function restoreAttendanceStudent(studentId) {
+  const student = state.attendanceStudents.find(item => item.id === studentId);
+  if (!student) return;
+  if (!canManageAttendanceBranch(student.branch || "Unassigned")) return alert("You can restore attendance students only for your branch.");
+  delete student.archivedAt;
+  delete student.archivedBy;
+  save();
+  render();
+}
+
+function permanentlyDeleteAttendanceStudent(studentId) {
+  if (!isSuperAdmin()) return alert("Only Super Admin can permanently delete attendance students.");
+  const student = state.attendanceStudents.find(item => item.id === studentId);
+  if (!student) return;
+  if (!confirm(`Permanently delete ${student.firstName} ${student.lastName || student.lastInitial || ""} from attendance? This cannot be undone.`)) return;
+  state.attendanceStudents = state.attendanceStudents.filter(item => item.id !== studentId);
+  Object.keys(state.attendanceRecords || {}).forEach(key => {
+    if (key.endsWith(`:${studentId}`)) delete state.attendanceRecords[key];
+  });
   save();
   render();
 }
@@ -4385,6 +4448,8 @@ function routeActions(e) {
   if (button.dataset.wa) sendWhatsApp(button.dataset.wa);
   if (button.dataset.archiveLead) archiveLead(button.dataset.archiveLead);
   if (button.dataset.archiveAttendanceStudent) archiveAttendanceStudent(button.dataset.archiveAttendanceStudent);
+  if (button.dataset.restoreAttendanceStudent) restoreAttendanceStudent(button.dataset.restoreAttendanceStudent);
+  if (button.dataset.permanentDeleteAttendanceStudent) permanentlyDeleteAttendanceStudent(button.dataset.permanentDeleteAttendanceStudent);
   if (button.dataset.attendanceMark) updateAttendanceStatus(button.dataset.attendanceMark, button.dataset.mark);
   if (button.dataset.restoreLead) restoreLead(button.dataset.restoreLead);
   if (button.dataset.permanentDelete) permanentlyDeleteLead(button.dataset.permanentDelete);
@@ -4393,6 +4458,7 @@ function routeActions(e) {
   if (button.dataset.editSettingsUser) editSettingsUser(button.dataset.editSettingsUser);
   if (button.dataset.deleteUser) deleteUser(button.dataset.deleteUser);
   if (button.dataset.applyTags) applyLineTags(Number(button.dataset.applyTags));
+  if (button.dataset.applyAttendanceFilters !== undefined) renderAttendance();
   if (button.dataset.editMaster) {
     const [key, index] = button.dataset.editMaster.split(":");
     editMasterValue(key, Number(index));

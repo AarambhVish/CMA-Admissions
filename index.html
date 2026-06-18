@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260618-attendance-last-col">
+  <link rel="stylesheet" href="styles.css?v=20260618-professor-database">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -99,6 +99,11 @@
         <h2>Archived Leads</h2>
         <p class="bulk-help">Deleted leads are stored here first. Lead Manager can restore or permanently delete them.</p>
         <div id="archiveTable" class="table-wrap"></div>
+      </section>
+      <section class="panel">
+        <h2>Archived Attendance Students</h2>
+        <p class="bulk-help">Students deleted from Attendance Register are stored here first. Only Super Admin can permanently delete them.</p>
+        <div id="attendanceArchiveTable" class="table-wrap"></div>
       </section>
     </section>
 
@@ -530,6 +535,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260618-attendance-last-col"></script>
+  <script src="app.js?v=20260618-professor-database"></script>
 </body>
 </html>
