@@ -4768,11 +4768,12 @@ function buildAttendanceHeaderMap(cells) {
 function attendanceHeaderField(label) {
   const clean = normalizeHeader(label);
   const aliases = {
-    firstName: ["firstname", "first", "studentname", "student", "name"],
+    firstName: ["firstname", "first", "givenname"],
     lastName: ["lastname", "last", "surname", "initial", "lastinitial", "lastnamefirstletter"],
     admissionDate: ["admissiondate", "dateofadmission", "admdate", "doa", "joiningdate", "joindate"],
     batchGroup: ["batch", "batchab", "group", "division", "batchgroup"],
     studentId: ["studentid", "studentcode", "rollno", "rollnumber", "id", "sid", "enrollmentno", "registrationno"],
+    fullName: ["fullname", "studentfullname", "studentname", "student", "name"],
     studentType: ["type", "studenttype", "status"]
   };
   const standard = Object.entries(aliases).find(([, names]) => names.includes(clean));
@@ -4793,6 +4794,11 @@ function parseAttendanceHeaderRow(cells, headerMap) {
     const value = String(cells[index] || "").trim();
     if (!value) return;
     if (field === "firstName") student.firstName = titleCase(value.split(/\s+/)[0] || value);
+    if (field === "fullName") {
+      const parsedName = parseAttendanceNameOnly(value);
+      student.firstName = parsedName.firstName || student.firstName;
+      student.lastName = student.lastName || parsedName.lastName;
+    }
     if (field === "lastName") student.lastName = lastInitialOnly(value);
     if (field === "admissionDate") student.admissionDate = normalizeDateInput(value);
     if (field === "batchGroup") student.batchGroup = /^[AB]$/i.test(value) ? value.toUpperCase() : value;
@@ -4809,6 +4815,15 @@ function parseAttendanceHeaderRow(cells, headerMap) {
   }
   student.lastName = lastInitialOnly(student.lastName);
   return student.firstName ? student : null;
+}
+
+function parseAttendanceNameOnly(value) {
+  const clean = String(value || "").replace(/^\d+[\). -]*/, "").replace(/[|,;]+/g, " ").replace(/\s+/g, " ").trim();
+  const parts = clean.split(" ").filter(Boolean);
+  return {
+    firstName: titleCase(parts[0] || ""),
+    lastName: lastInitialOnly(parts.slice(1).find(part => /^[A-Za-z]/.test(part)) || "")
+  };
 }
 
 function parseAttendanceFreeTextLine(line) {

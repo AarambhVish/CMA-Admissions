@@ -373,13 +373,21 @@ td.actions { white-space: nowrap; }
 }
 .attendance-bulk-box {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(170px, 220px) minmax(420px, 1fr);
+  gap: 8px;
   align-items: stretch;
   margin: 10px 0;
 }
+.attendance-bulk-box #addAttendanceBulk {
+  grid-column: 1 / -1;
+}
 .attendance-bulk-box textarea {
+  min-height: 92px;
+  width: 100%;
+}
+.attendance-bulk-box select {
   min-height: 44px;
+  width: 100%;
 }
 .attendance-start-label {
   display: inline-flex;
@@ -929,6 +937,9 @@ body[data-theme="dark"] .paper-faculty-course {
   .topbar, .split { display: block; }
   .top-actions { margin-top: 14px; }
   .metric-grid, .filters, .form-grid.three, .form-grid.two, .settings-grid { grid-template-columns: 1fr; }
+  .attendance-bulk-box {
+    grid-template-columns: 1fr;
+  }
   .settings-grid > .panel > .form-grid[data-master-form],
   .paper-faculty-row,
   .paper-faculty-form {
