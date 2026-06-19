@@ -174,6 +174,7 @@ let legacySheetPayload = null;
 let admissionSheetPayload = null;
 let syncAdmissionsAfterLegacy = false;
 let admissionSort = { key: "status", direction: "asc" };
+let tableSorts = {};
 
 function id() { return Math.random().toString(36).slice(2, 10); }
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -1019,8 +1020,8 @@ function admissionViewRows() {
     recordSource: "Admission",
     leadStatus: row.status || "Converted / Admitted",
     admissionDisplayStatus: "Converted / Admitted",
-    counsellor: branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || row.counsellor || row.assignedTo || "",
-    assignedTo: branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || row.assignedTo || row.counsellor || ""
+    counsellor: row.counsellor || row.assignedTo || branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || "",
+    assignedTo: row.assignedTo || row.counsellor || branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || ""
   }));
 
   attendanceRoster()
@@ -1037,8 +1038,8 @@ function admissionViewRows() {
     .forEach(lead => pushUnique({
       ...lead,
       batch: lead.batch || "Unassigned",
-      counsellor: branchInchargeName(lead.branch || "") || lead.assignedTo || "",
-      assignedTo: branchInchargeName(lead.branch || "") || lead.assignedTo || "",
+      counsellor: lead.assignedTo || branchInchargeName(lead.branch || "") || "",
+      assignedTo: lead.assignedTo || branchInchargeName(lead.branch || "") || "",
       recordSource: "Lead",
       leadStatus: lead.status || "New Lead",
       admissionDisplayStatus: statusFilter ? lead.status || "New Lead" : "Yet to Take Admission",
@@ -1120,6 +1121,22 @@ function branchInchargeName(branch = "") {
   return accessUser?.name || "";
 }
 
+function defaultCounsellorForBranch(branch = "", fallback = "") {
+  return branchInchargeName(branch) || fallback || state.users.find(user => !isSuperAdminUser(user))?.name || state.users[0]?.name || "";
+}
+
+function shouldUseBranchCounsellor(assignedTo = "") {
+  if (!assignedTo) return true;
+  const user = state.users.find(item => item.name === assignedTo);
+  return Boolean(user && isSuperAdminUser(user));
+}
+
+function applyBranchCounsellor(lead) {
+  const branchHandler = branchInchargeName(lead.branch || "");
+  if (branchHandler && shouldUseBranchCounsellor(lead.assignedTo)) lead.assignedTo = branchHandler;
+  return lead;
+}
+
 function canViewAdmissionLead(lead) {
   if (!currentUser || canManageAllAttendance()) return true;
   const userName = normalizePersonName(currentUser.name || "");
@@ -1191,8 +1208,8 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
     paymentMode: "",
     receiptNumber: student.studentId || "",
     studentId: student.studentId || "",
-    counsellor: branchIncharge || student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
-    assignedTo: branchIncharge || student.counsellor || student.createdBy || linkedLead?.assignedTo || "",
+    counsellor: student.counsellor || linkedLead?.assignedTo || branchIncharge || student.createdBy || "",
+    assignedTo: student.counsellor || linkedLead?.assignedTo || branchIncharge || student.createdBy || "",
     followupAt: linkedLead?.followupAt || "",
     source: linkedLead?.source || "Attendance",
     recordSource: "Attendance",
@@ -1237,7 +1254,7 @@ function renderAdmissions() {
       <td>${admissionLeadStatusCell(row)}</td>
       <td>${admissionDateCell(row)}</td>
       <td>${dueLabel(row)}</td>
-      <td>${escapeHtml(row.counsellor || row.assignedTo || "")}</td>
+      <td>${admissionCounsellorCell(row)}</td>
       <td>${escapeHtml(row.recordSource || "")}</td>
     </tr>`).join("")}</tbody>
   </table>`;
@@ -1312,6 +1329,15 @@ function renderAdmissions() {
 
 function admissionDeleteCell(row) {
   return `<button class="pill-remove admission-delete" data-admission-delete="${escapeAttr(admissionRecordKey(row))}" type="button" title="Archive">x</button>`;
+}
+
+function admissionCounsellorCell(row) {
+  const value = row.counsellor || row.assignedTo || "";
+  const recordKey = admissionRecordKey(row);
+  const names = [...new Set([value, ...state.users.map(user => user.name)].filter(Boolean))];
+  return `<select class="compact-select" data-admission-counsellor="${escapeAttr(recordKey)}">
+    ${names.map(name => `<option value="${escapeAttr(name)}" ${name === value ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
+  </select>`;
 }
 
 function renderAttendance() {
@@ -1518,9 +1544,6 @@ function prepareAttendanceForms() {
 
 function attendanceBatchChoices() {
   const choices = [...new Set([...(masters.attendanceBatches || []), ...state.attendanceSessions.map(s => s.batch), ...state.attendanceStudents.map(s => s.batch), ...admissionRowsForAttendance().map(row => row.batch)].filter(Boolean))];
-  if (!canManageAllAttendance()) {
-    return choices.filter(batch => canAccessAttendanceBatch(batch, attendanceBatchLocation(batch)));
-  }
   return choices;
 }
 
@@ -4124,7 +4147,31 @@ function table(idName, rows, headings, mapRow) {
     target.innerHTML = "<p class='muted'>No records found.</p>";
     return;
   }
-  target.innerHTML = `<table><thead><tr>${headings.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${mapRow(r).map(v => `<td>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const mappedRows = rows.map(row => ({ row, cells: mapRow(row) }));
+  const sort = tableSorts[idName];
+  if (sort) {
+    const factor = sort.direction === "desc" ? -1 : 1;
+    mappedRows.sort((a, b) => cellSortText(a.cells[sort.index]).localeCompare(cellSortText(b.cells[sort.index]), undefined, { numeric: true, sensitivity: "base" }) * factor);
+  }
+  target.innerHTML = `<table><thead><tr>${headings.map((h, index) => `<th><button class="table-sort" type="button" data-table-sort="${idName}:${index}">${h}${sort?.index === index ? ` ${sort.direction === "asc" ? "^" : "v"}` : ""}</button></th>`).join("")}</tr></thead><tbody>${mappedRows.map(r => `<tr>${r.cells.map(v => `<td>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function cellSortText(value) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = String(value ?? "");
+  const formValue = wrapper.querySelector("select, input, textarea")?.value || "";
+  return (formValue || wrapper.textContent || "").trim().toLowerCase();
+}
+
+function updateTableSort(payload) {
+  const [idName, indexValue] = String(payload || "").split(":");
+  const index = Number(indexValue);
+  if (!idName || Number.isNaN(index)) return;
+  const current = tableSorts[idName];
+  tableSorts[idName] = current?.index === index
+    ? { index, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { index, direction: "asc" };
+  render();
 }
 
 function openLeadForm(lead) {
@@ -4159,12 +4206,14 @@ function saveLead(e) {
     masters.sources.push(data.newReference.trim());
   }
   data.createdAt = data.id ? data.createdAt || new Date().toISOString() : new Date().toISOString();
+  if (!data.id) data.createdBy = currentUser?.name || "";
   data.lastTouchedAt = data.id ? new Date().toISOString() : "";
   data.lastTouchType = data.id ? "Edited" : "";
   data.customFields = collectLeadCustomFields(e.target);
   data.academicBackground = buildAcademicSummary(data);
   data.currentQualification = data.educationLevel || "";
   data.pastPerformance = [data.tenthPercent && `10th: ${data.tenthPercent}`, data.twelfthPercent && `12th: ${data.twelfthPercent}`, data.graduationPercent && `Graduation: ${data.graduationPercent}`].filter(Boolean).join(", ");
+  applyBranchCounsellor(data);
   const duplicate = state.leads.find(l => l.studentMobile === data.studentMobile && l.id !== data.id);
   if (duplicate && !confirm(`Duplicate mobile found for ${displayLeadName(duplicate)}. Save anyway?`)) return;
   if (data.id) state.leads = state.leads.map(l => l.id === data.id ? { ...l, ...data } : l);
@@ -4415,7 +4464,7 @@ function openAdmission(leadId) {
   form.elements.leadId.value = leadId;
   form.elements.admissionDate.value = todayDate();
   form.elements.course.value = lead.course;
-  form.elements.counsellor.value = lead.assignedTo;
+  form.elements.counsellor.value = defaultCounsellorForBranch(lead.branch || "", lead.assignedTo);
   document.getElementById("admissionDialog").showModal();
 }
 function saveAdmission(e) {
@@ -4425,6 +4474,8 @@ function saveAdmission(e) {
   lead.status = "Converted / Admitted";
   lead.batch = data.batch || lead.batch || "Unassigned";
   lead.branch = lead.branch || "Unassigned";
+  data.counsellor = defaultCounsellorForBranch(lead.branch || data.branch || "", data.counsellor || lead.assignedTo);
+  lead.assignedTo = data.counsellor || lead.assignedTo;
   markLeadTouched(lead, "Admission");
   if (data.batch && data.batch !== "Unassigned") addUnique(masters.attendanceBatches, data.batch);
   state.admissions.unshift({ ...data, id: id() });
@@ -4559,11 +4610,13 @@ function saveBulk() {
     if (lead.course) addUnique(masters.courses, lead.course);
     if (lead.source) addUnique(masters.sources, lead.source);
     const nameParts = String(lead.studentName || "").trim().split(/\s+/);
+    applyBranchCounsellor(lead);
     return {
       ...lead,
       firstName: lead.firstName || titleCase(nameParts.shift() || ""),
       lastName: lead.lastName || titleCase(nameParts.join(" ")),
       studentName: titleCase(lead.studentName || ""),
+      createdBy: lead.createdBy || currentUser?.name || "",
       lastTouchedAt: "",
       lastTouchType: ""
     };
@@ -4633,7 +4686,7 @@ function parseLeadBlock(block) {
     currentQualification: academicBackground || "",
     college: "",
     source,
-    assignedTo: state.users[0]?.name || "",
+    assignedTo: defaultCounsellorForBranch(branch),
     status: "New Lead",
     followupAt: "",
     createdAt: new Date().toISOString(),
@@ -4641,6 +4694,7 @@ function parseLeadBlock(block) {
     lastTouchType: "",
     remarks: block,
     createdAt: todayDate(),
+    createdBy: currentUser?.name || "",
     rawText: block,
     duplicate: Boolean(studentMobile && state.leads.some(l => l.studentMobile === studentMobile))
   };
@@ -4702,6 +4756,7 @@ function collectBulkPreviewEdits() {
     lead.currentQualification = lead.academicBackground;
     lead.remarks = lead.rawText;
     lead.duplicate = Boolean(lead.studentMobile && state.leads.some(l => l.studentMobile === lead.studentMobile));
+    applyBranchCounsellor(lead);
   });
 }
 
@@ -4990,6 +5045,9 @@ function routeActions(e) {
   if (button.dataset.admissionSort) {
     updateAdmissionSort(button.dataset.admissionSort);
   }
+  if (button.dataset.tableSort) {
+    updateTableSort(button.dataset.tableSort);
+  }
 }
 
 function routeSelectActions(e) {
@@ -5029,6 +5087,11 @@ function routeSelectActions(e) {
   const admissionLeadStatus = e.target.closest("[data-admission-lead-status]");
   if (admissionLeadStatus) {
     updateAdmissionLeadStatus(admissionLeadStatus.dataset.admissionLeadStatus, admissionLeadStatus.value);
+    return;
+  }
+  const admissionCounsellor = e.target.closest("[data-admission-counsellor]");
+  if (admissionCounsellor) {
+    updateAdmissionCounsellor(admissionCounsellor.dataset.admissionCounsellor, admissionCounsellor.value);
     return;
   }
   if (e.target.id === "restoreDataFile") {
@@ -5109,6 +5172,45 @@ function updateAdmissionLeadStatus(recordKey, value) {
       markLeadTouched(linkedLead, "Admission Status");
     } else {
       student.leadStatus = value;
+    }
+    save();
+    renderAdmissions();
+  }
+}
+
+function updateAdmissionCounsellor(recordKey, value) {
+  const [type, recordId] = String(recordKey || "").split(":");
+  if (!value) return;
+  if (type === "lead") {
+    const lead = state.leads.find(item => item.id === recordId);
+    if (!lead) return;
+    lead.assignedTo = value;
+    markLeadTouched(lead, "Counsellor Changed");
+    save();
+    renderAdmissions();
+    return;
+  }
+  if (type === "attendance") {
+    const student = state.attendanceStudents.find(item => item.id === recordId);
+    if (!student) return;
+    student.counsellor = value;
+    const linkedLead = leadForAttendanceStudent(student);
+    if (linkedLead) {
+      linkedLead.assignedTo = value;
+      markLeadTouched(linkedLead, "Counsellor Changed");
+    }
+    save();
+    renderAdmissions();
+    return;
+  }
+  if (type === "admission") {
+    const admission = state.admissions.find(item => item.id === recordId);
+    if (!admission) return;
+    admission.counsellor = value;
+    const lead = state.leads.find(item => item.id === admission.leadId);
+    if (lead) {
+      lead.assignedTo = value;
+      markLeadTouched(lead, "Counsellor Changed");
     }
     save();
     renderAdmissions();
