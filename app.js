@@ -1321,7 +1321,7 @@ function renderAdmissions() {
       <td>${admissionLeadStatusCell(row)}</td>
       <td>${admissionDateCell(row)}</td>
       <td>${dueLabel(row)}</td>
-      <td>${escapeHtml(row.counsellor || row.assignedTo || "")}</td>
+      <td>${admissionCounsellorCell(row)}</td>
       <td>${escapeHtml(row.recordSource || "")}</td>
     </tr>`).join("")}</tbody>
   </table>`;
