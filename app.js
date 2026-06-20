@@ -841,6 +841,7 @@ function bindEvents() {
   document.getElementById("exportAdmissions")?.addEventListener("click", () => alert("Export is disabled."));
   document.getElementById("exportCampaigns")?.addEventListener("click", () => alert("Export is disabled."));
   document.body.addEventListener("click", routeActions);
+  document.body.addEventListener("submit", routeDynamicForms);
   document.body.addEventListener("change", routeSelectActions);
   document.body.addEventListener("input", routeAttendanceFilterInputs);
   document.body.addEventListener("change", routeAttendanceTextEdits);
@@ -848,6 +849,13 @@ function bindEvents() {
   document.addEventListener("copy", blockProtectedCopy);
   document.addEventListener("cut", blockProtectedCopy);
   document.addEventListener("contextmenu", blockProtectedContextMenu);
+}
+
+function routeDynamicForms(e) {
+  if (e.defaultPrevented) return;
+  if (e.target?.id === "settingsUserForm") {
+    saveUser(e);
+  }
 }
 
 function isProtectedDataElement(element) {
@@ -4760,6 +4768,8 @@ async function saveUser(e) {
     state.users.push({ id: id(), createdAt: data.updatedAt, ...data });
   }
   save();
+  setSheetStatus("User saved. Syncing to cloud for other PC/mobile login...", "busy");
+  showCloudReminderPopup("User saved. Cloud sync is running.");
   clearUserForm(e.target.id);
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
