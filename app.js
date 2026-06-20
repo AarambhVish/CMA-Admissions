@@ -2705,7 +2705,7 @@ function renderUserTabAccess(containerId, user = null) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const role = user?.role || container.closest("form")?.elements.role?.value || "";
-  const selected = Array.isArray(user?.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(role);
+  const selected = user?.tabAccessMode === "custom" && Array.isArray(user?.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(role);
   const disabled = !isSuperAdmin() ? "disabled" : "";
   container.innerHTML = `
     <label class="access-title">Tabs visible to this user <span class="muted">(role default can be edited here)</span></label>
@@ -2719,9 +2719,15 @@ function collectTabAccess(form) {
   return checked.length ? checked : tabs.map(([key]) => key);
 }
 
+function sameTabAccess(left = [], right = []) {
+  const a = normalizeUserTabAccess(left).sort().join("|");
+  const b = normalizeUserTabAccess(right).sort().join("|");
+  return a === b;
+}
+
 function userAccessLabel(user) {
   if (isSuperAdminUser(user)) return "All tabs";
-  const allowed = Array.isArray(user.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(user.role);
+  const allowed = user?.tabAccessMode === "custom" && Array.isArray(user.tabAccess) && user.tabAccess.length ? normalizeUserTabAccess(user.tabAccess) : roleTabDefaults(user.role);
   if (allowed.length === tabs.length) return "All tabs";
   return allowed.map(key => tabs.find(tab => tab[0] === key)?.[1] || key).join(", ");
 }
@@ -2743,6 +2749,7 @@ function applyRoleDefaultsToUserForm(form) {
   if (!form || !isSuperAdmin()) return;
   const role = form.elements.role?.value || "";
   const selected = roleTabDefaults(role);
+  form.dataset.roleChanged = "1";
   form.querySelectorAll('input[name="tabAccess"]').forEach(input => {
     input.checked = selected.includes(input.value);
   });
@@ -4758,7 +4765,9 @@ async function saveUser(e) {
     data.passwordHash = await hashPassword(defaultPassword);
   }
   if (!state.users.length && !data.id) data.role = "Super Admin";
-  data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || tabs.map(([key]) => key);
+  const roleChanged = Boolean(existingUser && existingUser.role !== data.role) || e.target.dataset.roleChanged === "1";
+  data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || roleTabDefaults(data.role);
+  data.tabAccessMode = roleChanged || sameTabAccess(data.tabAccess, roleTabDefaults(data.role)) ? "role" : existingUser?.tabAccessMode || "custom";
   data.updatedAt = new Date().toISOString();
   data.updatedBy = currentUser?.name || "System";
   if (data.id) {
@@ -4773,6 +4782,7 @@ async function saveUser(e) {
   clearUserForm(e.target.id);
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
+  delete e.target.dataset.roleChanged;
   render();
 }
 
