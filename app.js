@@ -265,8 +265,8 @@ function recordMergeKey(item = {}, listName = "") {
 function mergeRecord(base = {}, next = {}) {
   const baseTime = recordTimestamp(base);
   const nextTime = recordTimestamp(next);
-  if (nextTime > baseTime) return { ...base, ...next, customFields: { ...(base.customFields || {}), ...(next.customFields || {}) } };
-  return { ...next, ...base, customFields: { ...(next.customFields || {}), ...(base.customFields || {}) } };
+  if (nextTime > baseTime) return { ...base, ...next, customFields: { ...(base.customFields || {}), ...(next.customFields || {}) }, tabAccess: next.tabAccess || base.tabAccess, branchAccess: next.branchAccess || base.branchAccess, passwordHash: next.passwordHash || base.passwordHash };
+  return { ...next, ...base, customFields: { ...(next.customFields || {}), ...(base.customFields || {}) }, tabAccess: base.tabAccess || next.tabAccess, branchAccess: base.branchAccess || next.branchAccess, passwordHash: base.passwordHash || next.passwordHash };
 }
 
 function recordTimestamp(item = {}) {
@@ -2334,10 +2334,12 @@ function renderSettings() {
         <input name="name" placeholder="Admin name" required>
         <input name="mobile" placeholder="Mobile">
         <input name="email" placeholder="Email">
+        <input name="password" type="password" placeholder="Password (blank = first name for new user)">
         <select name="role">${masters.roles.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select>
         <label>Primary Branch<select name="branch">${withUnassigned(masters.branches).map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select></label>
         <label>Allowed Locations<select name="branchAccess" multiple size="5">${masters.branches.map(v => `<option>${escapeHtml(v)}</option>`).join("")}</select></label>
         <div id="settingsUserTabAccess" class="access-list"></div>
+        <p class="bulk-help">For a new user, blank password becomes their first name. While editing, blank keeps the old password.</p>
         <button class="primary">Save Admin</button>
         <button type="button" data-clear-user-form="settingsUserForm">Add New Admin</button>
       </form>
@@ -2883,7 +2885,7 @@ function queueCloudSave() {
   const settings = getSheetSyncSettings();
   if (!settings.auto || !settings.url || isCloudLoading) return;
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => saveToSheet({ silent: true }), 1200);
+  syncTimer = setTimeout(() => syncCloudNow({ silent: true }), 1200);
 }
 
 function startPeriodicSheetSync() {
@@ -4743,14 +4745,19 @@ async function saveUser(e) {
     data.passwordHash = await hashPassword(newPassword);
   } else if (existingUser?.passwordHash) {
     data.passwordHash = existingUser.passwordHash;
+  } else if (!data.id) {
+    const defaultPassword = firstNameOf(data.name || "").trim() || data.name || "1234";
+    data.passwordHash = await hashPassword(defaultPassword);
   }
   if (!state.users.length && !data.id) data.role = "Super Admin";
   data.tabAccess = isSuperAdmin() ? collectTabAccess(e.target) : existingUser?.tabAccess || tabs.map(([key]) => key);
+  data.updatedAt = new Date().toISOString();
+  data.updatedBy = currentUser?.name || "System";
   if (data.id) {
-    state.users = state.users.map(user => user.id === data.id ? { ...user, ...data } : user);
+    state.users = state.users.map(user => user.id === data.id ? { ...user, ...data, createdAt: user.createdAt || data.createdAt || data.updatedAt } : user);
   } else {
     delete data.id;
-    state.users.push({ id: id(), ...data });
+    state.users.push({ id: id(), createdAt: data.updatedAt, ...data });
   }
   save();
   clearUserForm(e.target.id);

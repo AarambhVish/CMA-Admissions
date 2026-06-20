@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260620-recovery-admin-login">
+  <link rel="stylesheet" href="styles.css?v=20260620-user-password-cloud-login">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -274,7 +274,7 @@
             <input name="name" placeholder="Name" required>
             <input name="mobile" placeholder="Mobile">
             <input name="email" placeholder="Email">
-            <input name="password" type="password" placeholder="Set / reset password">
+            <input name="password" type="password" placeholder="Password (blank = first name for new user)">
             <select name="role">
               <option>Super Admin</option>
               <option>Lead Manager</option>
@@ -283,6 +283,7 @@
             <label>Primary Branch<select name="branch"></select></label>
             <label>Allowed Locations<select name="branchAccess" multiple size="5"></select></label>
             <div id="userTabAccess" class="access-list"></div>
+            <p class="bulk-help">For a new user, leave password blank to use their first name as password. While editing, blank keeps the old password.</p>
             <button class="primary">Save User</button>
             <button type="button" data-clear-user-form="userForm">Add New User</button>
           </form>
@@ -535,6 +536,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260620-recovery-admin-login"></script>
+  <script src="app.js?v=20260620-user-password-cloud-login"></script>
 </body>
 </html>
