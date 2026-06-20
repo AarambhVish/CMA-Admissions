@@ -133,6 +133,31 @@ body {
   font-size: 12px;
   white-space: nowrap;
 }
+
+.cloud-reminder-popup {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1000;
+  max-width: 320px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.18);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.cloud-reminder-popup.show {
+  opacity: 1;
+  transform: translateY(0);
+}
 .locked-action { color: var(--muted); font-size: 12px; }
 .row-actions {
   display: flex;

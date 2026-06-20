@@ -1,7 +1,11 @@
 const storeKey = "cmaAdmissionCrm.v1";
-const fixedSheetWebAppUrl = "";
+const fixedSheetWebAppUrl = [
+  "https://script.google.com/macros/s/",
+  "AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A",
+  "/exec"
+].join("");
 const fixedDatabaseSpreadsheetUrl = "";
-const cloudReminderMinutes = 15;
+const cloudReminderMinutes = 10;
 const tabs = [
   ["dashboard", "Dashboard"],
   ["leads", "Leads"],
@@ -184,8 +188,10 @@ function localInputValue(d) { return new Date(d.getTime() - d.getTimezoneOffset(
 function load() {
   const raw = localStorage.getItem(storeKey);
   if (!raw) {
-    localStorage.setItem(storeKey, JSON.stringify(seed));
-    return structuredClone(seed);
+    const blank = structuredClone(seed);
+    localStorage.setItem(storeKey, JSON.stringify(blank));
+    writeLocalSafetyBackupFor(blank, "first app start");
+    return blank;
   }
   const loaded = JSON.parse(raw);
   normalizeStateDefaults(loaded);
@@ -196,6 +202,110 @@ function load() {
     localStorage.setItem(storeKey, JSON.stringify(loaded));
   }
   return loaded;
+}
+
+function mergeCloudState(localData = {}, cloudData = {}) {
+  const merged = structuredClone(localData || {});
+  normalizeStateDefaults(merged);
+  const incoming = structuredClone(cloudData || {});
+  normalizeStateDefaults(incoming);
+
+  [
+    "leads",
+    "followups",
+    "admissions",
+    "attendanceStudents",
+    "attendanceSessions",
+    "campaigns",
+    "users",
+    "templates",
+    "targets",
+    "customAttendanceFields",
+    "customLeadFields"
+  ].forEach(key => {
+    merged[key] = mergeRecordList(merged[key], incoming[key], key);
+  });
+
+  merged.attendanceRecords = { ...(incoming.attendanceRecords || {}), ...(merged.attendanceRecords || {}) };
+  merged.masters = mergeMasters(merged.masters, incoming.masters);
+  merged.leadColumns = mergeConfigList(merged.leadColumns, incoming.leadColumns, "key");
+  merged.attendanceStudentColumns = mergeConfigList(merged.attendanceStudentColumns, incoming.attendanceStudentColumns, "key");
+  merged.roleTabAccess = normalizeRoleTabAccess({ ...(incoming.roleTabAccess || {}), ...(merged.roleTabAccess || {}) }, merged.masters.roles);
+  merged.attendanceLectureColumnWidth = Number(merged.attendanceLectureColumnWidth || incoming.attendanceLectureColumnWidth) || 82;
+  merged.professorDatabaseSeeded = merged.professorDatabaseSeeded || incoming.professorDatabaseSeeded;
+  merged.planningSeeded = merged.planningSeeded || incoming.planningSeeded;
+  normalizeStateDefaults(merged);
+  return merged;
+}
+
+function mergeRecordList(localList = [], cloudList = [], listName = "") {
+  if (listName === "customAttendanceFields" || listName === "customLeadFields") {
+    return [...new Set([...(cloudList || []), ...(localList || [])].filter(Boolean))];
+  }
+  const records = new Map();
+  [...(cloudList || []), ...(localList || [])].forEach(item => {
+    if (!item || typeof item !== "object") return;
+    const key = recordMergeKey(item, listName);
+    const existing = records.get(key);
+    records.set(key, existing ? mergeRecord(existing, item) : structuredClone(item));
+  });
+  return [...records.values()];
+}
+
+function recordMergeKey(item = {}, listName = "") {
+  if (item.id) return `id:${item.id}`;
+  if (listName === "users") return `user:${normalizePersonName(item.name || item.email || item.mobile || "")}`;
+  if (listName === "leads") return `lead:${onlyPhone(item.studentMobile || item.mobile || "") || normalizePersonName(displayLeadName(item) || item.name || "")}`;
+  if (listName === "attendanceStudents") return `attendance:${normalizeAttendanceChoice(item.batch || "")}|${normalizeAttendanceChoice(item.branch || "")}|${normalizePersonName([item.firstName, item.lastName || item.lastInitial].filter(Boolean).join(" "))}|${item.studentId || ""}`;
+  if (listName === "admissions") return `admission:${item.leadId || onlyPhone(item.studentMobile || "") || normalizePersonName(displayLeadName(item) || item.studentName || "")}`;
+  return `${listName}:${JSON.stringify(item)}`;
+}
+
+function mergeRecord(base = {}, next = {}) {
+  const baseTime = recordTimestamp(base);
+  const nextTime = recordTimestamp(next);
+  if (nextTime > baseTime) return { ...base, ...next, customFields: { ...(base.customFields || {}), ...(next.customFields || {}) } };
+  return { ...next, ...base, customFields: { ...(next.customFields || {}), ...(base.customFields || {}) } };
+}
+
+function recordTimestamp(item = {}) {
+  const value = item.updatedAt || item.lastTouchedAt || item.archivedAt || item.admissionDate || item.createdAt || item.followupAt || "";
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function mergeConfigList(localList = [], cloudList = [], keyName = "key") {
+  const map = new Map();
+  [...(cloudList || []), ...(localList || [])].forEach(item => {
+    if (!item || typeof item !== "object") return;
+    const key = item[keyName] || item.label || JSON.stringify(item);
+    map.set(key, { ...(map.get(key) || {}), ...item });
+  });
+  return [...map.values()];
+}
+
+function mergeMasters(localMasters = {}, cloudMasters = {}) {
+  const merged = structuredClone(localMasters || {});
+  const incoming = structuredClone(cloudMasters || {});
+  Object.keys(defaultMasters).forEach(key => {
+    if (key === "paperFaculty") {
+      merged.paperFaculty = mergePaperFacultyObjects(merged.paperFaculty, incoming.paperFaculty);
+      return;
+    }
+    merged[key] = [...new Set([...(incoming[key] || []), ...(merged[key] || [])].filter(Boolean))];
+  });
+  return merged;
+}
+
+function mergePaperFacultyObjects(localFaculty = {}, cloudFaculty = {}) {
+  const merged = structuredClone(cloudFaculty || {});
+  Object.entries(localFaculty || {}).forEach(([course, papers]) => {
+    merged[course] = merged[course] || {};
+    Object.entries(papers || {}).forEach(([paper, names]) => {
+      merged[course][paper] = [...new Set([...(merged[course][paper] || []), ...(names || [])].filter(Boolean))];
+    });
+  });
+  return merged;
 }
 
 function normalizeStateDefaults(data) {
@@ -369,7 +479,11 @@ function dataScore(data = {}) {
 }
 
 function writeLocalSafetyBackup(reason = "manual") {
-  const score = dataScore(state);
+  writeLocalSafetyBackupFor(state, reason);
+}
+
+function writeLocalSafetyBackupFor(data, reason = "manual") {
+  const score = dataScore(data);
   if (score <= 0) return;
   let existingScore = 0;
   try {
@@ -380,7 +494,7 @@ function writeLocalSafetyBackup(reason = "manual") {
     savedAt: new Date().toISOString(),
     reason,
     score,
-    data: stripSensitiveData(structuredClone(state))
+    data: stripSensitiveData(structuredClone(data))
   }));
 }
 
@@ -439,8 +553,17 @@ async function loginUser(e) {
   const data = Object.fromEntries(new FormData(e.target).entries());
   const loginId = normalizeLogin(data.loginId);
   const password = String(data.password || "");
-  const user = state.users.find(u => loginMatchesUser(loginId, u));
+  let user = state.users.find(u => loginMatchesUser(loginId, u));
   const loginError = document.getElementById("loginError");
+  if (!user) {
+    const settings = getSheetSyncSettings();
+    if (settings.auto && settings.url) {
+      loginError.textContent = "Checking cloud database for this user...";
+      loginError.classList.remove("hidden");
+      await loadFromSheet({ silent: true });
+      user = state.users.find(u => loginMatchesUser(loginId, u));
+    }
+  }
   if (!user) {
     loginError.textContent = "User not found. Use first name, full name, mobile, or email.";
     loginError.classList.remove("hidden");
@@ -828,7 +951,6 @@ function renderDashboard() {
   ];
   document.getElementById("metricGrid").innerHTML = metrics.map(m => metric(m[0], m[1], m[2])).join("");
   renderBarList("courseChart", countBy(leads, "course"));
-  renderAdminPerformance();
   table("dashboardFollowups", leads.filter(l => dueToday(l) || isOverdue(l)), ["Student", "Mobile", "Course", "Admin", "Follow-up", "Status"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, formatDate(l.followupAt), statusText(l.status)]);
   table("untouchedLeads", untouched, ["Student", "Mobile", "Course", "Admin", "Untouched Since"], l => [displayLeadName(l), l.studentMobile, l.course, l.assignedTo, untouchedLabel(l)]);
 }
@@ -842,12 +964,24 @@ function renderBarList(idName, counts) {
   document.getElementById(idName).innerHTML = Object.entries(counts).map(([name, value]) => `<div class="bar-row"><span>${name}</span><div class="bar"><span style="width:${value / max * 100}%"></span></div><strong>${value}</strong></div>`).join("") || "<p class='muted'>No data yet.</p>";
 }
 function renderAdminPerformance() {
-  const rows = state.users.map(u => {
-    const leads = activeLeads().filter(l => l.assignedTo === u.name);
-    const converted = leads.filter(l => l.status === "Converted / Admitted").length;
-    return { name: u.name, assigned: leads.length, followups: state.followups.filter(f => f.createdBy === u.name).length, pending: leads.filter(l => l.followupAt && !isOverdue(l)).length, converted, ratio: leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%" };
-  });
-  table("adminPerformance", rows, ["Admin", "Assigned", "Follow-ups", "Pending", "Converted", "Ratio"], r => [r.name, r.assigned, r.followups, r.pending, r.converted, r.ratio]);
+  const target = document.getElementById("adminPerformance");
+  if (!target) return;
+  const admissionRows = admissionViewRows({ applyFilters: false }).filter(admissionRowMatchesReportFilters);
+  const rows = state.users.map(user => {
+    const rowsForAdmin = admissionRows.filter(row => admissionRowCounsellor(row) === user.name);
+    const admitted = rowsForAdmin.filter(row => admissionFilterStatus(row) === "Converted / Admitted").length;
+    const pending = rowsForAdmin.filter(row => admissionFilterStatus(row) !== "Converted / Admitted").length;
+    const followups = rowsForAdmin.filter(row => row.followupAt && admissionFilterStatus(row) !== "Converted / Admitted").length;
+    return {
+      name: user.name,
+      admissions: rowsForAdmin.length,
+      admitted,
+      pending,
+      followups,
+      ratio: rowsForAdmin.length ? `${Math.round(admitted / rowsForAdmin.length * 100)}%` : "0%"
+    };
+  }).filter(row => row.admissions || row.followups || row.admitted || row.pending);
+  table("adminPerformance", rows, ["Admin", "Admission Records", "Admitted", "Yet to Admit", "Follow-ups", "Admission Ratio"], r => [r.name, r.admissions, r.admitted, r.pending, r.followups, r.ratio]);
 }
 
 function openDashboardMetric(action) {
@@ -1001,12 +1135,12 @@ function renderFollowups() {
   ]);
 }
 
-function admissionViewRows() {
+function admissionViewRows({ applyFilters = true } = {}) {
   const statusFilter = document.getElementById("admission-status")?.value || "";
   const rows = [];
   const seen = new Set();
   const pushUnique = row => {
-    if (!admissionRowMatchesFilters(row)) return;
+    if (applyFilters && !admissionRowMatchesFilters(row)) return;
     const key = admissionViewKey(row);
     if (seen.has(key)) return;
     seen.add(key);
@@ -1020,8 +1154,8 @@ function admissionViewRows() {
     recordSource: "Admission",
     leadStatus: row.status || "Converted / Admitted",
     admissionDisplayStatus: "Converted / Admitted",
-    counsellor: row.counsellor || row.assignedTo || branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || "",
-    assignedTo: row.assignedTo || row.counsellor || branchInchargeName(row.branch || attendanceBatchLocation(row.batch || "")) || ""
+    counsellor: admissionRowCounsellor(row),
+    assignedTo: admissionRowCounsellor(row)
   }));
 
   attendanceRoster()
@@ -1038,8 +1172,8 @@ function admissionViewRows() {
     .forEach(lead => pushUnique({
       ...lead,
       batch: lead.batch || "Unassigned",
-      counsellor: lead.assignedTo || branchInchargeName(lead.branch || "") || "",
-      assignedTo: lead.assignedTo || branchInchargeName(lead.branch || "") || "",
+      counsellor: admissionRowCounsellor(lead),
+      assignedTo: admissionRowCounsellor(lead),
       recordSource: "Lead",
       leadStatus: lead.status || "New Lead",
       admissionDisplayStatus: statusFilter ? lead.status || "New Lead" : "Yet to Take Admission",
@@ -1077,7 +1211,7 @@ function admissionSortValue(row, key) {
     leadStatus: row.leadStatus || "",
     admissionDate: row.admissionDate || "",
     followupAt: row.followupAt || "",
-    counsellor: row.counsellor || row.assignedTo || "",
+    counsellor: admissionRowCounsellor(row),
     source: row.recordSource || ""
   };
   return String(values[key] ?? "").toLowerCase();
@@ -1121,6 +1255,20 @@ function branchInchargeName(branch = "") {
   return accessUser?.name || "";
 }
 
+function effectiveCounsellorForBranch(branch = "", saved = "") {
+  const branchHandler = branchInchargeName(branch);
+  if (branchHandler && shouldUseBranchCounsellor(saved)) return branchHandler;
+  return saved || branchHandler || "";
+}
+
+function admissionRowBranch(row = {}) {
+  return row.branch || attendanceBatchLocation(row.batch || "") || "";
+}
+
+function admissionRowCounsellor(row = {}) {
+  return effectiveCounsellorForBranch(admissionRowBranch(row), row.counsellor || row.assignedTo || row.createdBy || "");
+}
+
 function defaultCounsellorForBranch(branch = "", fallback = "") {
   return branchInchargeName(branch) || fallback || state.users.find(user => !isSuperAdminUser(user))?.name || state.users[0]?.name || "";
 }
@@ -1140,6 +1288,7 @@ function applyBranchCounsellor(lead) {
 function canViewAdmissionLead(lead) {
   if (!currentUser || canManageAllAttendance()) return true;
   const userName = normalizePersonName(currentUser.name || "");
+  if (normalizePersonName(admissionRowCounsellor(lead)) === userName) return true;
   if (normalizePersonName(lead.assignedTo || "") === userName) return true;
   const allowedBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
   return allowedBranches.includes(normalizeAttendanceChoice(lead.branch || ""));
@@ -1151,6 +1300,19 @@ function admissionRowMatchesFilters(row) {
     if (!selected) return true;
     if (key === "status") return admissionFilterStatus(row) === selected;
     if (key === "followupDate") return String(row.followupAt || "").slice(0, 10) === selected;
+    if (key === "assignedTo") return admissionRowCounsellor(row) === selected;
+    if (key === "source") return String(row.source || row.leadSource || row.recordSource || "") === selected;
+    return String(row[key] || "") === selected;
+  });
+}
+
+function admissionRowMatchesReportFilters(row) {
+  return ["course", "branch", "source", "status", "assignedTo"].every(key => {
+    const selected = document.getElementById(`report-${key}`)?.value || "";
+    if (!selected) return true;
+    if (key === "status") return admissionFilterStatus(row) === selected;
+    if (key === "assignedTo") return admissionRowCounsellor(row) === selected;
+    if (key === "source") return String(row.source || row.leadSource || row.recordSource || "") === selected;
     return String(row[key] || "") === selected;
   });
 }
@@ -1188,7 +1350,7 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
   const leadStatus = isAdmitted ? "Converted / Admitted" : linkedLead?.status || student.leadStatus || "Yet to Take Admission";
   const displayStatus = isAdmitted ? "Converted / Admitted" : statusFilter ? leadStatus : "Yet to Take Admission";
   const branch = student.branch || attendanceBatchLocation(student.batch || "") || "";
-  const branchIncharge = branchInchargeName(branch);
+  const counsellor = effectiveCounsellorForBranch(branch, student.counsellor || linkedLead?.assignedTo || student.createdBy || "");
   return {
     id: `attendance-view-${student.id}`,
     leadId: student.leadId || linkedLead?.id || "",
@@ -1208,8 +1370,8 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
     paymentMode: "",
     receiptNumber: student.studentId || "",
     studentId: student.studentId || "",
-    counsellor: student.counsellor || linkedLead?.assignedTo || branchIncharge || student.createdBy || "",
-    assignedTo: student.counsellor || linkedLead?.assignedTo || branchIncharge || student.createdBy || "",
+    counsellor,
+    assignedTo: counsellor,
     followupAt: linkedLead?.followupAt || "",
     source: linkedLead?.source || "Attendance",
     recordSource: "Attendance",
@@ -1332,7 +1494,7 @@ function admissionDeleteCell(row) {
 }
 
 function admissionCounsellorCell(row) {
-  const value = row.counsellor || row.assignedTo || "";
+  const value = admissionRowCounsellor(row);
   const recordKey = admissionRecordKey(row);
   const names = [...new Set([value, ...state.users.map(user => user.name)].filter(Boolean))];
   return `<select class="compact-select" data-admission-counsellor="${escapeAttr(recordKey)}">
@@ -1655,6 +1817,7 @@ function admissionToAttendanceStudent(row) {
   const batch = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
   if (!batch) return null;
   const branch = row.branch || attendanceBatchLocation(batch) || "Unassigned";
+  const counsellor = effectiveCounsellorForBranch(branch, row.counsellor || row.assignedTo || "");
   return {
     id: `admission-${row.id}`,
     admissionId: row.id,
@@ -1668,10 +1831,10 @@ function admissionToAttendanceStudent(row) {
     customFields: row.customFields || {},
     batch,
     branch,
-    counsellor: row.counsellor || row.assignedTo || "",
+    counsellor,
     studentType: "Admitted",
     createdAt: row.admissionDate || row.createdAt || "",
-    createdBy: row.counsellor || row.assignedTo || "",
+    createdBy: counsellor,
     source: "Admission"
   };
 }
@@ -1688,7 +1851,7 @@ function canAccessAttendanceBatch(batch = "", branch = "") {
   const ownBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
   const hasOwnAdmission = admissionsWithLead().some(row =>
     normalizeAttendanceChoice(row.batch || "") === normalizedBatch &&
-    (normalizePersonName(row.counsellor || "") === userName || normalizePersonName(row.assignedTo || "") === userName)
+    (normalizePersonName(admissionRowCounsellor(row)) === userName || normalizePersonName(row.counsellor || "") === userName || normalizePersonName(row.assignedTo || "") === userName)
   );
   const batchHasAdmissions = state.admissions.some(admission => normalizeAttendanceChoice(admission.batch || "") === normalizedBatch);
   const hasOwnManualStudent = state.attendanceStudents.some(student =>
@@ -2069,8 +2232,11 @@ function admissionsWithLead() {
 function canViewAdmissionRow(row) {
   if (!currentUser || canManageAllAttendance()) return true;
   const userName = normalizePersonName(currentUser.name || "");
+  if (normalizePersonName(admissionRowCounsellor(row)) === userName) return true;
   if (normalizePersonName(row.counsellor || "") === userName) return true;
   if (normalizePersonName(row.assignedTo || "") === userName) return true;
+  const allowedBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
+  if (allowedBranches.includes(normalizeAttendanceChoice(admissionRowBranch(row)))) return true;
   return false;
 }
 
@@ -2089,6 +2255,7 @@ function renderReports() {
   ].join("");
   renderGroupReport("sourceReport", leads, "source");
   renderGroupReport("branchReport", leads, "branch");
+  renderAdminPerformance();
 }
 function renderGroupReport(idName, leads, key) {
   const rows = Object.entries(countBy(leads, key)).map(([name, total]) => {
@@ -2601,6 +2768,20 @@ function setSheetStatus(message, type = "info") {
   setCloudBadge(message, type);
 }
 
+function showCloudReminderPopup(message) {
+  let popup = document.getElementById("cloudReminderPopup");
+  if (!popup) {
+    popup = document.createElement("div");
+    popup.id = "cloudReminderPopup";
+    popup.className = "cloud-reminder-popup";
+    document.body.appendChild(popup);
+  }
+  popup.textContent = message;
+  popup.classList.add("show");
+  clearTimeout(showCloudReminderPopup.timer);
+  showCloudReminderPopup.timer = setTimeout(() => popup.classList.remove("show"), 6500);
+}
+
 function setCloudBadge(message, type = "info") {
   const badge = document.getElementById("cloudStatusBadge");
   if (!badge) return;
@@ -2691,40 +2872,57 @@ function startPeriodicSheetSync() {
   periodicSyncTimer = setInterval(() => {
     const settings = getSheetSyncSettings();
     if (settings.auto && settings.url && !isCloudLoading) {
-      setSheetStatus("15-minute cloud reminder: saving latest CRM data...", "busy");
-      saveToSheet({ silent: false, reminder: true });
+      setSheetStatus(`${cloudReminderMinutes}-minute auto sync: loading others' work and saving latest CRM data...`, "busy");
+      syncCloudNow({ silent: false, reminder: true });
     }
   }, cloudReminderMinutes * 60 * 1000);
+}
+
+async function syncCloudNow({ silent = false, reminder = false } = {}) {
+  if (!silent) setCloudButtonBusy("save", true);
+  if (!silent) setSheetStatus(reminder ? `${cloudReminderMinutes}-minute auto sync running...` : "Syncing cloud: loading others' work, then saving yours...", "busy");
+  if (reminder) showCloudReminderPopup("Auto sync running: loading others' work and saving yours.");
+  try {
+    await loadFromSheet({ silent: true });
+    const saved = await saveToSheet({ silent: true });
+    if (!silent) setSheetStatus(saved ? "Work synced: others' work loaded and your work saved." : "Sync could not complete. Check cloud access.", saved ? "ok" : "error");
+    if (reminder) showCloudReminderPopup(saved ? "Auto sync complete. Work is saved on cloud." : "Auto sync needs attention. Please press Save Work.");
+    return saved;
+  } finally {
+    if (!silent) setCloudButtonBusy("save", false);
+  }
 }
 
 function saveToSheet({ silent = false, reminder = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
     if (!silent) setSheetStatus("Cloud sync is not configured on this device.", "error");
-    return;
+    return Promise.resolve(false);
   }
   if (!hasBusinessData()) {
     if (silent || reminder) {
       setCloudBadge("Cloud save skipped: current browser data is empty.", "error");
-      return;
+      return Promise.resolve(false);
     }
-    if (!confirm("Current browser data has no users/leads/admissions. Saving now may overwrite cloud data with an empty database. Save anyway?")) return;
+    if (!confirm("Current browser data has no users/leads/admissions. Saving now may overwrite cloud data with an empty database. Save anyway?")) return Promise.resolve(false);
   }
   if (!silent) setCloudButtonBusy("save", true);
-  if (!silent) setSheetStatus(reminder ? "15-minute cloud reminder: saving latest CRM data..." : "Saving to Google Sheet...", "busy");
+  if (!silent) setSheetStatus(reminder ? `${cloudReminderMinutes}-minute cloud reminder: saving latest CRM data...` : "Saving to Google Sheet...", "busy");
   const body = new URLSearchParams();
   body.set("mode", "save");
   if (settings.token) body.set("token", settings.token);
   body.set("payload", JSON.stringify(stripSensitiveData(structuredClone(state))));
-  fetch(settings.url, { method: "POST", mode: "no-cors", body })
+  return fetch(settings.url, { method: "POST", mode: "no-cors", body })
     .then(() => {
       localStorage.setItem(`${storeKey}.lastCloudSave`, new Date().toISOString());
-      if (!silent) setSheetStatus(reminder ? "Cloud saved. Next reminder/save will run in 15 minutes." : "Saved to Google Sheet.", "ok");
+      if (!silent) setSheetStatus(reminder ? `Cloud saved. Next reminder/save will run in ${cloudReminderMinutes} minutes.` : "Saved to Google Sheet.", "ok");
       if (silent) updateCloudBadgeFromLastSave();
+      return true;
     })
     .catch(() => {
       if (!silent) setSheetStatus("Save failed. Check Web App URL and sharing permissions.", "error");
       if (silent) setCloudBadge("Save failed. Check Web App URL and sharing permissions.", "error");
+      return false;
     })
     .finally(() => {
       if (!silent) setCloudButtonBusy("save", false);
@@ -2735,59 +2933,70 @@ function loadFromSheet({ silent = false } = {}) {
   const settings = getSheetSyncSettings();
   if (!settings.url) {
     if (!silent) setSheetStatus("Cloud sync is not configured on this device.", "error");
-    return;
+    return Promise.resolve(false);
   }
-  const callbackName = `crmSheetLoad_${Date.now()}`;
-  if (!silent) setCloudButtonBusy("load", true);
-  setSheetStatus(silent ? "Auto-loading latest CRM data from cloud..." : "Loading from Google Sheet...", "busy");
-  window[callbackName] = payload => {
-    try {
-      if (payload?.data) {
-        const incoming = payload.data;
-        normalizeStateDefaults(incoming);
-        const localScore = dataScore(state);
-        const incomingScore = dataScore(incoming);
-        if (localScore > 0 && incomingScore < Math.max(5, Math.floor(localScore * 0.35))) {
-          const message = `Cloud load blocked because cloud data looks empty/older. Local score ${localScore}, cloud score ${incomingScore}.`;
-          setSheetStatus(message, "error");
-          return;
-        }
-        isCloudLoading = true;
-        backupBeforeReplace(silent ? "auto cloud load" : "manual cloud load");
-        state = incoming;
-        masters = state.masters || masters;
-        localStorage.setItem(storeKey, JSON.stringify(state));
-        isCloudLoading = false;
-        loadCurrentUser();
-        render();
-        localStorage.setItem(`${storeKey}.lastCloudLoad`, new Date().toISOString());
-        setSheetStatus(silent ? "Latest cloud data loaded on app start." : "Loaded from Google Sheet.", "ok");
-      } else if (!silent) {
-        setSheetStatus("Google Sheet is empty. Save current data to initialize it.", "info");
-      } else {
-        setSheetStatus("Cloud database is empty. Use Save your work to initialize it.", "info");
-      }
-    } catch {
-      setSheetStatus("Could not load Google Sheet data.", "error");
-    } finally {
+  return new Promise(resolve => {
+    const callbackName = `crmSheetLoad_${Date.now()}`;
+    if (!silent) setCloudButtonBusy("load", true);
+    setSheetStatus(silent ? "Auto-loading latest CRM data from cloud..." : "Loading from Google Sheet...", "busy");
+    const finish = result => {
       isCloudLoading = false;
       if (!silent) setCloudButtonBusy("load", false);
       delete window[callbackName];
       document.getElementById(callbackName)?.remove();
-    }
-  };
-  const script = document.createElement("script");
-  script.id = callbackName;
-  const loadParams = new URLSearchParams({ mode: "load", callback: callbackName, t: String(Date.now()) });
-  if (settings.token) loadParams.set("token", settings.token);
-  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}${loadParams.toString()}`;
-  script.onerror = () => {
-    setSheetStatus("Load failed. Check Web App URL deployment access.", "error");
-    if (!silent) setCloudButtonBusy("load", false);
-    delete window[callbackName];
-    script.remove();
-  };
-  document.body.appendChild(script);
+      resolve(result);
+    };
+    window[callbackName] = payload => {
+      try {
+        if (payload?.data) {
+          const incoming = payload.data;
+          normalizeStateDefaults(incoming);
+          const localScore = dataScore(state);
+          const incomingScore = dataScore(incoming);
+          if (localScore > 0 && incomingScore < Math.max(5, Math.floor(localScore * 0.35))) {
+            const message = `Cloud load blocked because cloud data looks empty/older. Local score ${localScore}, cloud score ${incomingScore}.`;
+            setSheetStatus(message, "error");
+            finish(false);
+            return;
+          }
+          isCloudLoading = true;
+          backupBeforeReplace(silent ? "auto cloud load" : "manual cloud load");
+          const merged = mergeCloudState(state, incoming);
+          const mergedScore = dataScore(merged);
+          state = merged;
+          masters = state.masters || masters;
+          localStorage.setItem(storeKey, JSON.stringify(state));
+          writeLocalSafetyBackup("cloud merge");
+          isCloudLoading = false;
+          loadCurrentUser();
+          render();
+          localStorage.setItem(`${storeKey}.lastCloudLoad`, new Date().toISOString());
+          setSheetStatus(silent ? "Latest cloud data merged on app start." : "Loaded and merged from Google Sheet.", "ok");
+          if (mergedScore > incomingScore) setTimeout(() => saveToSheet({ silent: true }), 1500);
+          finish(true);
+        } else if (!silent) {
+          setSheetStatus("Google Sheet is empty. Save current data to initialize it.", "info");
+          finish(false);
+        } else {
+          setSheetStatus("Cloud database is empty. Use Save your work to initialize it.", "info");
+          finish(false);
+        }
+      } catch {
+        setSheetStatus("Could not load Google Sheet data.", "error");
+        finish(false);
+      }
+    };
+    const script = document.createElement("script");
+    script.id = callbackName;
+    const loadParams = new URLSearchParams({ mode: "load", callback: callbackName, t: String(Date.now()) });
+    if (settings.token) loadParams.set("token", settings.token);
+    script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}${loadParams.toString()}`;
+    script.onerror = () => {
+      setSheetStatus("Load failed. Check Web App URL deployment access.", "error");
+      finish(false);
+    };
+    document.body.appendChild(script);
+  });
 }
 
 function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
@@ -5005,7 +5214,7 @@ function routeActions(e) {
   if (button.dataset.removeAttendanceColumn !== undefined) removeAttendanceColumn(Number(button.dataset.removeAttendanceColumn));
   if (button.dataset.saveSheetSettings !== undefined) saveSheetSyncSettings();
   if (button.dataset.loadFromSheet !== undefined) loadFromSheet();
-  if (button.dataset.saveToSheet !== undefined) saveToSheet();
+  if (button.dataset.saveToSheet !== undefined) syncCloudNow();
   if (button.dataset.restoreLocalBackup !== undefined) restoreLocalSafetyBackup();
   if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
   if (button.dataset.updateAdmissionSheet !== undefined) updateFromAdmissionGoogleSheet();

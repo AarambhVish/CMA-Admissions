@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260619-admission-counsellor-edit">
+  <link rel="stylesheet" href="styles.css?v=20260620-cloud-login-full-sync">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -65,16 +65,10 @@
 
     <section id="dashboard" class="page active">
       <div id="metricGrid" class="metric-grid"></div>
-      <div class="split">
-        <section class="panel">
-          <h2>Course-wise Leads</h2>
-          <div id="courseChart" class="bar-list"></div>
-        </section>
-        <section class="panel">
-          <h2>Admin Performance</h2>
-          <div id="adminPerformance" class="table-wrap"></div>
-        </section>
-      </div>
+      <section class="panel">
+        <h2>Course-wise Leads</h2>
+        <div id="courseChart" class="bar-list"></div>
+      </section>
       <section class="panel">
         <h2>Today and Overdue Follow-ups</h2>
         <div id="dashboardFollowups" class="table-wrap"></div>
@@ -260,6 +254,11 @@
           <div id="branchReport" class="table-wrap"></div>
         </section>
       </div>
+      <section class="panel">
+        <h2>Admin Performance</h2>
+        <p class="bulk-help">Based on Admissions tab records, including students fetched from Attendance Register.</p>
+        <div id="adminPerformance" class="table-wrap"></div>
+      </section>
     </section>
 
     <section id="users" class="page">
@@ -536,6 +535,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260619-admission-counsellor-edit"></script>
+  <script src="app.js?v=20260620-cloud-login-full-sync"></script>
 </body>
 </html>
