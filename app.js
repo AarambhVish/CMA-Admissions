@@ -1,4 +1,5 @@
 const storeKey = "cmaAdmissionCrm.v1";
+const recoveryAdminPasswordHash = "c1c224b03cd9bc7b6a86d77f5dace40191766c485cd55dc48caf9ac873335d6f";
 const fixedSheetWebAppUrl = [
   "https://script.google.com/macros/s/",
   "AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A",
@@ -353,7 +354,26 @@ function normalizeStateDefaults(data) {
       branch: "Unassigned",
       branchAccess: [],
       tabAccess: tabs.map(([key]) => key),
-      passwordHash: "3b612c75a7b5048a435fb6ec81e52ff92d6d795a8b5a9c17070f6a63c97a53b2"
+      passwordHash: recoveryAdminPasswordHash
+    });
+  }
+  const recoveryAdmin = data.users.find(user => user.id === "recovery-admin");
+  if (recoveryAdmin) {
+    recoveryAdmin.name = recoveryAdmin.name || "Admin";
+    recoveryAdmin.role = "Super Admin";
+    recoveryAdmin.tabAccess = tabs.map(([key]) => key);
+    recoveryAdmin.passwordHash = recoveryAdminPasswordHash;
+  } else {
+    data.users.push({
+      id: "recovery-admin",
+      name: "Admin",
+      mobile: "",
+      email: "",
+      role: "Super Admin",
+      branch: "Unassigned",
+      branchAccess: [],
+      tabAccess: tabs.map(([key]) => key),
+      passwordHash: recoveryAdminPasswordHash
     });
   }
   data.leads.forEach(lead => {
