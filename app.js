@@ -1311,9 +1311,9 @@ function leadForAttendanceStudent(student) {
 function branchInchargeName(branch = "") {
   const normalizedBranch = normalizeAttendanceChoice(branch);
   if (!normalizedBranch) return "";
-  const primary = state.users.find(user => normalizeAttendanceChoice(user.branch || "") === normalizedBranch);
+  const primary = state.users.find(user => !isSuperAdminUser(user) && normalizeAttendanceChoice(user.branch || "") === normalizedBranch);
   if (primary) return primary.name;
-  const accessUser = state.users.find(user => userBranchList(user).map(normalizeAttendanceChoice).includes(normalizedBranch));
+  const accessUser = state.users.find(user => !isSuperAdminUser(user) && userBranchList(user).map(normalizeAttendanceChoice).includes(normalizedBranch));
   return accessUser?.name || "";
 }
 
@@ -3855,8 +3855,10 @@ function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
   const branch = get("branch location", "branch", "location", "center", "centre") || detectBranch(Object.values(row).join(" "), Object.values(row).join(" ")) || "Unassigned";
   const admissionDate = parseDateForInput(get("admission date", "date of admission", "joining date", "join date", "adm date", "date")) || "";
   const studentId = get("student id", "studentid", "id", "roll no", "roll number", "registration no", "reg no");
-  const mobile = onlyPhone(get("mobile", "mobile no", "phone", "contact", "student mobile"));
-  const rowText = Object.entries(row).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`).join("\n");
+  const rowText = Object.entries(row)
+    .filter(([key, value]) => value && !isAdmissionPrivateContactHeader(key))
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
   return {
     firstName,
     lastName,
@@ -3864,12 +3866,16 @@ function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
     branch,
     admissionDate,
     studentId,
-    mobile,
+    mobile: "",
     course: "CMA Foundation",
     batch: "CMAFC D26",
     sheetName: "CMAFC D26",
     remarks: `Fetched from CMAFC D26${rowNumber ? ` row ${rowNumber}` : ""}\n${rowText}`
   };
+}
+
+function isAdmissionPrivateContactHeader(header = "") {
+  return /mobile|phone|contact|whatsapp|email/i.test(String(header || ""));
 }
 
 function pickSheetValue(row = {}, aliases = []) {
@@ -3883,7 +3889,6 @@ function pickSheetValue(row = {}, aliases = []) {
 
 function upsertCmafcD26Lead(data) {
   let lead = null;
-  if (data.mobile) lead = state.leads.find(item => onlyPhone(item.studentMobile || "") === data.mobile);
   if (!lead && data.studentId) lead = state.leads.find(item => item.customFields?.studentId === data.studentId || item.studentId === data.studentId);
   if (!lead && data.firstName) {
     const nameKey = normalizePersonName([data.firstName, data.lastName].filter(Boolean).join(" "));
