@@ -828,7 +828,9 @@ document.addEventListener("DOMContentLoaded", () => {
     loadFromSheet({ silent: true });
   }
   clearCampaignForm();
-  if (cleanupCmafcD26LeadsFromLeadList()) save();
+  const migratedCmafcLeads = cleanupCmafcD26LeadsFromLeadList();
+  const removedLeads = clearAllLeadRecords();
+  if (migratedCmafcLeads || removedLeads) save();
   render();
 });
 
@@ -3058,6 +3060,7 @@ function loadFromSheet({ silent = false } = {}) {
           state = merged;
           masters = state.masters || masters;
           cleanupCmafcD26LeadsFromLeadList();
+          clearAllLeadRecords();
           localStorage.setItem(storeKey, JSON.stringify(state));
           writeLocalSafetyBackup("cloud merge");
           isCloudLoading = false;
@@ -3904,6 +3907,15 @@ function cleanupCmafcD26LeadsFromLeadList() {
   state.leads = state.leads.filter(lead => !cmafcLeadIds.has(lead.id));
   state.followups = state.followups.filter(followup => !cmafcLeadIds.has(followup.leadId));
   return cmafcLeadIds.size;
+}
+
+function clearAllLeadRecords() {
+  const removed = (state.leads || []).length + (state.followups || []).length;
+  if (!removed) return 0;
+  state.leads = [];
+  state.followups = [];
+  parsedBulk = [];
+  return removed;
 }
 
 function upsertCmafcD26AdmissionOnly(data) {
