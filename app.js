@@ -8,24 +8,18 @@ const fixedSheetWebAppUrl = [
 const fixedDatabaseSpreadsheetUrl = "";
 const cloudReminderMinutes = 10;
 const tabs = [
-  ["dashboard", "Dashboard"],
   ["leads", "Leads"],
-  ["archive", "Archive"],
-  ["followups", "Follow-ups"],
-  ["admissions", "Admissions"],
-  ["attendance", "Attendance"],
-  ["targets", "Targets & Promotion"],
-  ["campaigns", "Campaigns"],
-  ["whatsapp", "WhatsApp Templates"],
+  ["admissions", "Admission"],
   ["reports", "Reports"],
-  ["users", "Users / Admins"],
+  ["users", "User/Admin"],
+  ["archive", "Archived"],
   ["settings", "Master Settings"]
 ];
 
 const defaultRoleTabAccess = {
   "Super Admin": tabs.map(([key]) => key),
-  "Lead Manager": ["dashboard", "leads", "archive", "followups", "admissions", "attendance", "targets", "campaigns", "whatsapp", "reports", "users"],
-  "Counsellor / Admin": ["dashboard", "leads", "followups", "admissions", "attendance", "whatsapp"]
+  "Lead Manager": ["leads", "admissions", "reports", "users", "archive", "settings"],
+  "Counsellor / Admin": ["leads", "admissions", "reports"]
 };
 
 const defaultLeadColumns = [
@@ -168,7 +162,7 @@ const seed = {
 
 let state = load();
 let masters = state.masters;
-let activeTab = "dashboard";
+let activeTab = "leads";
 let parsedBulk = [];
 let currentUser = null;
 let syncTimer = null;
@@ -900,26 +894,20 @@ function render() {
     return;
   }
   renderTabs();
-  if (!canSeeTab(activeTab)) activeTab = accessibleTabs()[0]?.[0] || "dashboard";
+  if (!canSeeTab(activeTab)) activeTab = accessibleTabs()[0]?.[0] || "leads";
   document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === activeTab));
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === activeTab));
-  document.getElementById("pageTitle").textContent = tabs.find(t => t[0] === activeTab)?.[1] || "Dashboard";
+  document.getElementById("pageTitle").textContent = tabs.find(t => t[0] === activeTab)?.[1] || "Leads";
   document.getElementById("addLeadTop").disabled = !currentUser;
   updateAuthView();
   hydrateSelects();
-  renderDashboard();
   renderFilters();
-  renderLeadTable();
-  renderArchive();
-  renderFollowups();
-  renderAdmissions();
-  renderAttendance();
-  renderTargetPlans();
-  renderCampaigns();
-  renderTemplates();
-  renderReports();
-  renderUsers();
-  renderSettings();
+  if (activeTab === "leads") renderLeadTable();
+  if (activeTab === "archive") renderArchive();
+  if (activeTab === "admissions") renderAdmissions();
+  if (activeTab === "reports") renderReports();
+  if (activeTab === "users") renderUsers();
+  if (activeTab === "settings") renderSettings();
 }
 
 function activeLeads() {
@@ -2335,6 +2323,7 @@ function renderSettings() {
     ${renderLeadColumnDesigner()}
     ${renderAttendanceColumnDesigner()}
     ${renderAttendanceStudentMasterPanel()}
+    ${renderWhatsAppTemplateSettings()}
     <section class="panel">
       <h2>Add Admin / User</h2>
       <form id="settingsUserForm" class="form-grid">
@@ -2369,6 +2358,27 @@ function renderSettings() {
   renderUserTabAccess("settingsUserTabAccess");
   renderSettingsUsers();
   renderSheetSyncSettings();
+}
+
+function renderWhatsAppTemplateSettings() {
+  return `<section class="panel">
+    <h2>WhatsApp Message Templates</h2>
+    <p class="bulk-help">Create standard messages for prospectus, fee details, demo reminders, and follow-ups. Leads use the matching course template first.</p>
+    <div id="settingsTemplateList" class="template-list">
+      ${state.templates.map(template => `<div class="template-card">
+        <strong>${escapeHtml(template.name || "Template")}</strong>
+        <span class="muted">${escapeHtml(template.course || "Any course")} | ${escapeHtml(template.stage || "Any stage")}</span>
+        <p>${escapeHtml(template.message || "")}</p>
+      </div>`).join("") || "<p class='muted'>No templates yet. Add your standard message below.</p>"}
+    </div>
+    <form id="settingsTemplateForm" class="form-grid">
+      <input name="name" placeholder="Template name e.g. Prospectus Message" required>
+      <select name="course">${masters.courses.map(course => `<option>${escapeHtml(course)}</option>`).join("")}</select>
+      <select name="stage">${masters.statuses.map(status => `<option>${escapeHtml(status)}</option>`).join("")}</select>
+      <textarea name="message" rows="5" placeholder="Use {{student_name}}, {{course_name}}, {{attempt}}, {{branch_name}}, {{counsellor_name}}" required></textarea>
+      <button class="primary">Save Template</button>
+    </form>
+  </section>`;
 }
 
 function renderAttendanceStudentMasterPanel() {
@@ -2470,7 +2480,6 @@ function renderLeadColumnDesigner() {
     <div class="toolbar">
       <button data-add-lead-column type="button" ${disabled}>Add Column</button>
       <button data-save-lead-columns class="primary" type="button" ${disabled}>Save Columns</button>
-      <button data-reset-lead-columns type="button" ${disabled}>Reset Default</button>
     </div>
     <div class="form-grid">
       <input id="newCustomLeadField" placeholder="Add new custom field column e.g. Enquiry Given By" ${disabled}>
@@ -2527,7 +2536,6 @@ function renderAttendanceColumnDesigner() {
     <div class="toolbar">
       <button data-add-attendance-column type="button" ${disabled}>Add Column</button>
       <button data-save-attendance-columns class="primary" type="button" ${disabled}>Save Attendance Layout</button>
-      <button data-reset-attendance-columns type="button" ${disabled}>Reset Default</button>
     </div>
     <div class="form-grid">
       <input id="newCustomAttendanceField" placeholder="Add custom attendance field e.g. Student ID, Roll No., Fees Status" ${disabled}>
@@ -2890,7 +2898,7 @@ function setCloudButtonBusy(action, busy) {
     button.textContent = action === "save" ? "Saving..." : "Loading...";
     button.disabled = true;
   } else {
-    button.textContent = button.dataset.originalText || (action === "save" ? "Save Work" : "Load Others Work");
+    button.textContent = button.dataset.originalText || (action === "save" ? "Cloud Save" : "Cloud Load");
     button.disabled = false;
     delete button.dataset.busy;
   }
@@ -2900,7 +2908,7 @@ function queueCloudSave() {
   const settings = getSheetSyncSettings();
   if (!settings.auto || !settings.url || isCloudLoading) return;
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => syncCloudNow({ silent: true }), 1200);
+  syncTimer = setTimeout(() => syncCloudNow({ silent: true }), 600);
 }
 
 function startPeriodicSheetSync() {
@@ -2923,7 +2931,7 @@ async function syncCloudNow({ silent = false, reminder = false } = {}) {
     await loadFromSheet({ silent: true });
     const saved = await saveToSheet({ silent: true });
     if (!silent) setSheetStatus(saved ? "Work synced: others' work loaded and your work saved." : "Sync could not complete. Check cloud access.", saved ? "ok" : "error");
-    if (reminder) showCloudReminderPopup(saved ? "Auto sync complete. Work is saved on cloud." : "Auto sync needs attention. Please press Save Work.");
+    if (reminder) showCloudReminderPopup(saved ? "Auto sync complete. Work is saved on cloud." : "Auto sync needs attention. Please check cloud access.");
     return saved;
   } finally {
     if (!silent) setCloudButtonBusy("save", false);
@@ -3928,6 +3936,7 @@ function bindSettingsForms() {
     });
   });
   document.getElementById("settingsUserForm")?.addEventListener("submit", saveUser);
+  document.getElementById("settingsTemplateForm")?.addEventListener("submit", saveTemplate);
   document.getElementById("attendanceStudentForm")?.addEventListener("submit", saveAttendanceStudent);
   document.getElementById("addAttendanceBulk")?.addEventListener("click", addBulkAttendanceStudents);
   document.getElementById("targetForm")?.addEventListener("submit", saveTarget);
@@ -5904,20 +5913,56 @@ function restoreDataBackup(file) {
   reader.readAsText(file);
 }
 
-function sendWhatsApp(leadId) {
-  const lead = state.leads.find(l => l.id === leadId);
-  const template = state.templates.find(t => t.course === lead.course) || state.templates[0];
+function whatsappPhone(value) {
+  let digits = onlyPhone(value);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return digits;
+  return digits.length >= 10 ? digits : "";
+}
+
+function bestWhatsAppTemplate(lead) {
+  return state.templates.find(t => t.course === lead.course && t.stage === lead.status)
+    || state.templates.find(t => t.course === lead.course)
+    || state.templates[0];
+}
+
+function buildWhatsAppMessage(lead) {
+  const template = bestWhatsAppTemplate(lead);
   const user = state.users.find(u => u.name === lead.assignedTo);
-  const msg = (template?.message || "Hello {{student_name}}, thank you for your interest in {{course_name}}.")
+  const message = template?.message || [
+    "Hello {{student_name}},",
+    "",
+    "Thank you for your interest in {{course_name}} {{attempt}} at {{branch_name}}.",
+    "Our counsellor {{counsellor_name}} will guide you with course details and admission next steps."
+  ].join("\n");
+  return message
     .replaceAll("{{student_name}}", displayLeadName(lead))
-    .replaceAll("{{course_name}}", lead.course)
+    .replaceAll("{{course_name}}", lead.course || "CMA")
     .replaceAll("{{attempt}}", lead.attempt || "")
     .replaceAll("{{branch_name}}", lead.branch || "")
+    .replaceAll("{{lead_status}}", lead.status || "")
     .replaceAll("{{counsellor_name}}", user?.name || lead.assignedTo || "");
+}
+
+function sendWhatsApp(leadId) {
+  const lead = state.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  const phone = whatsappPhone(lead.studentMobile);
+  if (!phone) {
+    alert("Please add a valid student mobile number before opening WhatsApp.");
+    return;
+  }
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(buildWhatsAppMessage(lead))}`;
+  const popup = window.open("about:blank", "_blank");
   markLeadTouched(lead, "WhatsApp");
   save();
   render();
-  window.open(`https://wa.me/91${lead.studentMobile}?text=${encodeURIComponent(msg)}`, "_blank");
+  if (popup) {
+    popup.location.href = url;
+  } else {
+    window.location.href = url;
+  }
 }
 
 function actionButtons(l) {
