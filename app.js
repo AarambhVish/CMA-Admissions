@@ -1,4 +1,5 @@
-const storeKey = "cmaAdmissionCrm.v1";
+const storeKey = "cmaAdmissionCrm.v2.freshStart";
+const resetGeneration = "2026-06-27-clean";
 const recoveryAdminPasswordHash = "c1c224b03cd9bc7b6a86d77f5dace40191766c485cd55dc48caf9ac873335d6f";
 const fixedSheetWebAppUrl = [
   "https://script.google.com/macros/s/",
@@ -10,6 +11,7 @@ const cloudReminderMinutes = 10;
 const tabs = [
   ["leads", "Leads"],
   ["admissions", "Admission"],
+  ["attendance", "Attendance"],
   ["reports", "Reports"],
   ["users", "User/Admin"],
   ["archive", "Archived"],
@@ -18,8 +20,8 @@ const tabs = [
 
 const defaultRoleTabAccess = {
   "Super Admin": tabs.map(([key]) => key),
-  "Lead Manager": ["leads", "admissions", "reports", "users", "archive", "settings"],
-  "Counsellor / Admin": ["leads", "admissions", "reports"]
+  "Lead Manager": ["leads", "admissions", "attendance", "reports", "users", "archive", "settings"],
+  "Counsellor / Admin": ["leads", "admissions", "attendance", "reports"]
 };
 
 const defaultLeadColumns = [
@@ -147,9 +149,19 @@ const seed = {
   attendanceSessions: [],
   attendanceRecords: {},
   campaigns: [],
-  users: [],
   templates: [],
   targets: [],
+  users: [{
+    id: "recovery-admin",
+    name: "Admin",
+    mobile: "",
+    email: "",
+    role: "Super Admin",
+    branch: "Unassigned",
+    branchAccess: [],
+    tabAccess: tabs.map(([key]) => key),
+    passwordHash: recoveryAdminPasswordHash
+  }],
   leadColumns: structuredClone(defaultLeadColumns),
   attendanceStudentColumns: structuredClone(defaultAttendanceStudentColumns),
   attendanceLectureColumnWidth: 82,
@@ -157,7 +169,20 @@ const seed = {
   professorDatabaseSeeded: true,
   customAttendanceFields: [],
   customLeadFields: [],
-  masters: { courses: [], branches: [], sources: structuredClone(defaultMasters.sources), statuses: [], roles: [], batches: [], attendanceBatches: structuredClone(defaultMasters.attendanceBatches), professors: structuredClone(defaultMasters.professors), foundationFaculty: structuredClone(defaultMasters.foundationFaculty), interFaculty: structuredClone(defaultMasters.interFaculty), paperFaculty: structuredClone(defaultMasters.paperFaculty), attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks) }
+  masters: {
+    courses: structuredClone(defaultMasters.courses),
+    branches: [],
+    sources: structuredClone(defaultMasters.sources),
+    statuses: structuredClone(defaultMasters.statuses),
+    roles: structuredClone(defaultMasters.roles),
+    batches: [],
+    attendanceBatches: [],
+    professors: [],
+    foundationFaculty: [],
+    interFaculty: [],
+    paperFaculty: structuredClone(defaultMasters.paperFaculty),
+    attendanceRemarks: structuredClone(defaultMasters.attendanceRemarks)
+  }
 };
 
 let state = load();
@@ -184,6 +209,7 @@ function load() {
   const raw = localStorage.getItem(storeKey);
   if (!raw) {
     const blank = structuredClone(seed);
+    normalizeStateDefaults(blank);
     localStorage.setItem(storeKey, JSON.stringify(blank));
     writeLocalSafetyBackupFor(blank, "first app start");
     return blank;
@@ -773,6 +799,14 @@ function addUnique(list, value) {
   if (!list.includes(value)) list.push(value);
 }
 
+function isFreshResetPending() {
+  return localStorage.getItem(`${storeKey}.resetGeneration`) !== resetGeneration;
+}
+
+function markFreshResetDone() {
+  localStorage.setItem(`${storeKey}.resetGeneration`, resetGeneration);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   renderTabs();
   hydrateSelects();
@@ -781,7 +815,13 @@ document.addEventListener("DOMContentLoaded", () => {
   applyTheme(getThemeSetting());
   ensureFixedSheetSync();
   startPeriodicSheetSync();
-  if (getSheetSyncSettings().auto && getSheetSyncSettings().url) loadFromSheet({ silent: true });
+  if (isFreshResetPending()) {
+    markFreshResetDone();
+    saveToSheet({ silent: true });
+    setSheetStatus("Fresh CRM reset is ready. Old cloud records were not loaded.", "ok");
+  } else if (getSheetSyncSettings().auto && getSheetSyncSettings().url) {
+    loadFromSheet({ silent: true });
+  }
   clearCampaignForm();
   render();
 });
@@ -905,6 +945,7 @@ function render() {
   if (activeTab === "leads") renderLeadTable();
   if (activeTab === "archive") renderArchive();
   if (activeTab === "admissions") renderAdmissions();
+  if (activeTab === "attendance") renderAttendance();
   if (activeTab === "reports") renderReports();
   if (activeTab === "users") renderUsers();
   if (activeTab === "settings") renderSettings();
