@@ -828,6 +828,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadFromSheet({ silent: true });
   }
   clearCampaignForm();
+  if (cleanupCmafcD26LeadsFromLeadList()) save();
   render();
 });
 
@@ -3056,6 +3057,7 @@ function loadFromSheet({ silent = false } = {}) {
           const mergedScore = dataScore(merged);
           state = merged;
           masters = state.masters || masters;
+          cleanupCmafcD26LeadsFromLeadList();
           localStorage.setItem(storeKey, JSON.stringify(state));
           writeLocalSafetyBackup("cloud merge");
           isCloudLoading = false;
@@ -3832,14 +3834,14 @@ function importCmafcD26AdmissionRows(rows = []) {
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  cleanupCmafcD26LeadsFromLeadList();
   rows.forEach((row, index) => {
     const data = cmafcD26RowToAdmissionData(row, index + 2);
     if (!data.firstName && !data.studentId) {
       skipped += 1;
       return;
     }
-    const lead = upsertCmafcD26Lead(data);
-    const admission = upsertCmafcD26Admission(lead, data);
+    const admission = upsertCmafcD26AdmissionOnly(data);
     if (admission.created) created += 1;
     else updated += 1;
   });
@@ -3876,6 +3878,73 @@ function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
 
 function isAdmissionPrivateContactHeader(header = "") {
   return /mobile|phone|contact|whatsapp|email/i.test(String(header || ""));
+}
+
+function cleanupCmafcD26LeadsFromLeadList() {
+  const cmafcLeadIds = new Set(state.leads
+    .filter(lead => lead.source === "Admission Sheet" && normalizeAttendanceChoice(lead.batch || "") === normalizeAttendanceChoice("CMAFC D26"))
+    .map(lead => lead.id));
+  if (!cmafcLeadIds.size) return 0;
+  state.admissions.forEach(admission => {
+    if (!cmafcLeadIds.has(admission.leadId)) return;
+    const lead = state.leads.find(item => item.id === admission.leadId);
+    if (lead) {
+      admission.firstName = admission.firstName || lead.firstName || "";
+      admission.lastName = admission.lastName || lastInitialOnly(lead.lastName || "");
+      admission.studentName = admission.studentName || displayLeadName(lead);
+      admission.branch = admission.branch || lead.branch || "";
+      admission.course = admission.course || lead.course || "CMA Foundation";
+      admission.batch = admission.batch || lead.batch || "CMAFC D26";
+      admission.studentId = admission.studentId || lead.studentId || lead.customFields?.studentId || admission.receiptNumber || "";
+      admission.receiptNumber = admission.receiptNumber || admission.studentId || "";
+      admission.studentMobile = "";
+    }
+    admission.leadId = "";
+  });
+  state.leads = state.leads.filter(lead => !cmafcLeadIds.has(lead.id));
+  state.followups = state.followups.filter(followup => !cmafcLeadIds.has(followup.leadId));
+  return cmafcLeadIds.size;
+}
+
+function upsertCmafcD26AdmissionOnly(data) {
+  const existing = state.admissions.find(item =>
+    normalizeAttendanceChoice(item.batch || "") === normalizeAttendanceChoice(data.batch) &&
+    (
+      (data.studentId && (item.studentId === data.studentId || item.receiptNumber === data.studentId)) ||
+      normalizePersonName(item.studentName || [item.firstName, item.lastName].filter(Boolean).join(" ")) === normalizePersonName(data.name)
+    )
+  );
+  const counsellor = defaultCounsellorForBranch(data.branch, currentUser?.name || "Admin");
+  const payload = {
+    leadId: "",
+    firstName: data.firstName,
+    lastName: data.lastName,
+    studentName: data.name,
+    studentMobile: "",
+    admissionDate: data.admissionDate || todayDate(),
+    course: data.course,
+    batch: data.batch,
+    branch: data.branch,
+    studentId: data.studentId || "",
+    feesAgreed: "",
+    feesPaid: "",
+    paymentMode: "",
+    receiptNumber: data.studentId || "",
+    counsellor,
+    assignedTo: counsellor,
+    status: "Converted / Admitted",
+    remarks: appendRemark("Fetched from CMAFC D26 admission sheet.", data.remarks)
+  };
+  if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
+  addUnique(masters.batches, data.batch);
+  addUnique(masters.attendanceBatches, data.batch);
+  if (existing) {
+    Object.assign(existing, { ...payload, id: existing.id });
+    return { created: false, admission: existing };
+  }
+  const admission = { id: id(), ...payload };
+  state.admissions.unshift(admission);
+  return { created: true, admission };
 }
 
 function pickSheetValue(row = {}, aliases = []) {
@@ -4999,14 +5068,14 @@ async function saveUser(e) {
     delete data.id;
     state.users.push({ id: id(), createdAt: data.updatedAt, ...data });
   }
-  save();
-  setSheetStatus("User saved. Syncing to cloud for other PC/mobile login...", "busy");
-  showCloudReminderPopup("User saved. Cloud sync is running.");
   clearUserForm(e.target.id);
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
   delete e.target.dataset.roleChanged;
   render();
+  save();
+  setSheetStatus("User saved. Syncing to cloud for other PC/mobile login...", "busy");
+  showCloudReminderPopup("User saved. Cloud sync is running.");
 }
 
 function editUser(userId) {
