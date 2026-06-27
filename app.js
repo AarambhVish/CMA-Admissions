@@ -3789,7 +3789,8 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
       document.getElementById(callbackName)?.remove();
       if (!payload?.ok) {
         if (!retried && /unauthor/i.test(payload?.error || "")) {
-          const nextToken = prompt("Admission sheet needs token. Enter Apps Script secret token:");
+          localStorage.removeItem(`${storeKey}.cmafcAdmissionToken`);
+          const nextToken = prompt("Enter CMAFC D26 admission sheet secret token:");
           if (nextToken) {
             localStorage.setItem(`${storeKey}.cmafcAdmissionToken`, nextToken.trim());
             fetchCmafcD26Admissions({ token: nextToken.trim(), retried: true });
@@ -3821,8 +3822,8 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
   script.onerror = () => {
     delete window[callbackName];
     document.getElementById(callbackName)?.remove();
-    setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment URL and access.", "error");
-    alert("CMAFC D26 fetch failed. Confirm your Apps Script is deployed as Web App and ends with /exec.");
+    setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment and /exec access.", "error");
+    alert("CMAFC D26 fetch failed. Confirm Apps Script is deployed as Web App: Execute as Me, Who has access Anyone, and URL ends with /exec.");
   };
   document.body.appendChild(script);
 }
