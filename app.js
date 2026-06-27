@@ -6,6 +6,11 @@ const fixedSheetWebAppUrl = [
   "AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A",
   "/exec"
 ].join("");
+const fixedCmafcAdmissionWebAppUrl = [
+  "https://script.google.com/macros/s/",
+  "AKfycbwHH2k9b-HDEGLFBrQyBUuw0JMlDs5DogfUO3gaidDr5Hw-RCwbbkQiRawq0cUt_zTR",
+  "/exec"
+].join("");
 const fixedDatabaseSpreadsheetUrl = "";
 const cloudReminderMinutes = 10;
 const tabs = [
@@ -3771,6 +3776,168 @@ function confirmImportAdmissionSheet() {
   alert(`Admissions updated.\nMatched leads: ${result.matched}\nNew admitted leads: ${result.created}\nAdmission records created/updated: ${result.admissions}\nSkipped rows: ${result.skipped}`);
 }
 
+function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
+  if (!isSuperAdmin() && !isLeadManager()) {
+    alert("Only Super Admin or Lead Manager can fetch admission sheet data.");
+    return;
+  }
+  const callbackName = `crmCmafcD26_${Date.now()}`;
+  setSheetStatus("Fetching CMAFC D26 admission data...", "busy");
+  window[callbackName] = payload => {
+    try {
+      delete window[callbackName];
+      document.getElementById(callbackName)?.remove();
+      if (!payload?.ok) {
+        if (!retried && /unauthor/i.test(payload?.error || "")) {
+          const nextToken = prompt("Admission sheet needs token. Enter Apps Script secret token:");
+          if (nextToken) {
+            localStorage.setItem(`${storeKey}.cmafcAdmissionToken`, nextToken.trim());
+            fetchCmafcD26Admissions({ token: nextToken.trim(), retried: true });
+            return;
+          }
+        }
+        throw new Error(payload?.error || "Could not fetch CMAFC D26.");
+      }
+      const result = importCmafcD26AdmissionRows(payload.rows || []);
+      save();
+      renderAdmissions();
+      setSheetStatus(`CMAFC D26 imported: ${result.created} new, ${result.updated} updated, ${result.skipped} skipped.`, "ok");
+      alert(`CMAFC D26 admissions fetched.\nNew records: ${result.created}\nUpdated records: ${result.updated}\nSkipped rows: ${result.skipped}`);
+    } catch (error) {
+      setSheetStatus(`CMAFC D26 fetch failed: ${error.message}`, "error");
+      alert(`CMAFC D26 fetch failed: ${error.message}`);
+    }
+  };
+  const script = document.createElement("script");
+  script.id = callbackName;
+  const params = new URLSearchParams({
+    mode: "cmafcD26",
+    callback: callbackName,
+    t: String(Date.now())
+  });
+  const savedToken = token ?? (localStorage.getItem(`${storeKey}.cmafcAdmissionToken`) || "");
+  if (savedToken) params.set("token", savedToken);
+  script.src = `${fixedCmafcAdmissionWebAppUrl}?${params.toString()}`;
+  script.onerror = () => {
+    delete window[callbackName];
+    document.getElementById(callbackName)?.remove();
+    setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment URL and access.", "error");
+    alert("CMAFC D26 fetch failed. Confirm your Apps Script is deployed as Web App and ends with /exec.");
+  };
+  document.body.appendChild(script);
+}
+
+function importCmafcD26AdmissionRows(rows = []) {
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  rows.forEach((row, index) => {
+    const data = cmafcD26RowToAdmissionData(row, index + 2);
+    if (!data.firstName && !data.studentId) {
+      skipped += 1;
+      return;
+    }
+    const lead = upsertCmafcD26Lead(data);
+    const admission = upsertCmafcD26Admission(lead, data);
+    if (admission.created) created += 1;
+    else updated += 1;
+  });
+  return { created, updated, skipped };
+}
+
+function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
+  const get = (...aliases) => pickSheetValue(row, aliases);
+  const fullName = get("student name", "name", "full name", "student", "first name");
+  const firstName = titleCase(get("first name", "firstname") || firstNameOf(fullName));
+  const lastRaw = get("last name", "lastname", "last", "surname") || String(fullName || "").trim().split(/\s+/).slice(1).join(" ");
+  const lastName = lastInitialOnly(lastRaw);
+  const branch = get("branch location", "branch", "location", "center", "centre") || detectBranch(Object.values(row).join(" "), Object.values(row).join(" ")) || "Unassigned";
+  const admissionDate = parseDateForInput(get("admission date", "date of admission", "joining date", "join date", "adm date", "date")) || "";
+  const studentId = get("student id", "studentid", "id", "roll no", "roll number", "registration no", "reg no");
+  const mobile = onlyPhone(get("mobile", "mobile no", "phone", "contact", "student mobile"));
+  const rowText = Object.entries(row).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`).join("\n");
+  return {
+    firstName,
+    lastName,
+    name: [firstName, lastName].filter(Boolean).join(" "),
+    branch,
+    admissionDate,
+    studentId,
+    mobile,
+    course: "CMA Foundation",
+    batch: "CMAFC D26",
+    sheetName: "CMAFC D26",
+    remarks: `Fetched from CMAFC D26${rowNumber ? ` row ${rowNumber}` : ""}\n${rowText}`
+  };
+}
+
+function pickSheetValue(row = {}, aliases = []) {
+  const entries = Object.entries(row);
+  const normalized = aliases.map(normalizeHeader);
+  const exact = entries.find(([key]) => normalized.includes(normalizeHeader(key)));
+  if (exact) return String(exact[1] || "").trim();
+  const loose = entries.find(([key]) => normalized.some(alias => normalizeHeader(key).includes(alias) || alias.includes(normalizeHeader(key))));
+  return String(loose?.[1] || "").trim();
+}
+
+function upsertCmafcD26Lead(data) {
+  let lead = null;
+  if (data.mobile) lead = state.leads.find(item => onlyPhone(item.studentMobile || "") === data.mobile);
+  if (!lead && data.studentId) lead = state.leads.find(item => item.customFields?.studentId === data.studentId || item.studentId === data.studentId);
+  if (!lead && data.firstName) {
+    const nameKey = normalizePersonName([data.firstName, data.lastName].filter(Boolean).join(" "));
+    lead = state.leads.find(item => normalizePersonName(displayLeadName(item)) === nameKey && normalizeAttendanceChoice(item.batch || "") === normalizeAttendanceChoice(data.batch));
+  }
+  if (!lead) {
+    lead = createLeadFromAdmissionData({
+      ...data,
+      parentMobile: "",
+      email: "",
+      receiptNumber: data.studentId,
+      counsellor: defaultCounsellorForBranch(data.branch, currentUser?.name || "Admin"),
+      customFields: { studentId: data.studentId }
+    }, data.remarks);
+    state.leads.unshift(lead);
+  } else {
+    mergeAdmissionDataIntoLead(lead, {
+      ...data,
+      receiptNumber: data.studentId,
+      counsellor: defaultCounsellorForBranch(data.branch, lead.assignedTo),
+      customFields: { ...(lead.customFields || {}), studentId: data.studentId }
+    }, { overwrite: true });
+    lead.remarks = appendRemark(lead.remarks, data.remarks);
+  }
+  lead.studentId = data.studentId || lead.studentId || "";
+  lead.customFields = { ...(lead.customFields || {}), studentId: data.studentId || lead.customFields?.studentId || "" };
+  if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
+  addUnique(masters.batches, data.batch);
+  addUnique(masters.attendanceBatches, data.batch);
+  return lead;
+}
+
+function upsertCmafcD26Admission(lead, data) {
+  const existing = state.admissions.find(item => item.leadId === lead.id || (data.studentId && item.receiptNumber === data.studentId));
+  const payload = {
+    leadId: lead.id,
+    admissionDate: data.admissionDate || todayDate(),
+    course: data.course,
+    batch: data.batch,
+    feesAgreed: "",
+    feesPaid: "",
+    paymentMode: "",
+    receiptNumber: data.studentId || "",
+    counsellor: defaultCounsellorForBranch(data.branch, lead.assignedTo),
+    remarks: appendRemark("Fetched from CMAFC D26 admission sheet.", data.remarks)
+  };
+  if (existing) {
+    Object.assign(existing, { ...payload, id: existing.id });
+    return { created: false, admission: existing };
+  }
+  const admission = { id: id(), ...payload };
+  state.admissions.unshift(admission);
+  return { created: true, admission };
+}
+
 function importAdmissionSheetRows(rows, headers, mapping, options = {}) {
   const stamp = new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
   let matched = 0;
@@ -5315,6 +5482,7 @@ function routeActions(e) {
   if (button.dataset.restoreLocalBackup !== undefined) restoreLocalSafetyBackup();
   if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
   if (button.dataset.updateAdmissionSheet !== undefined) updateFromAdmissionGoogleSheet();
+  if (button.dataset.fetchCmafcAdmissions !== undefined) fetchCmafcD26Admissions();
   if (button.dataset.syncLeadsAdmissions !== undefined) syncLeadsAndAdmissions();
   if (button.dataset.importLegacySheet !== undefined) confirmImportLegacySheet();
   if (button.dataset.importAdmissionSheet !== undefined) confirmImportAdmissionSheet();
