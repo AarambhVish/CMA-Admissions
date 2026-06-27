@@ -2356,6 +2356,11 @@ function renderSettingsUsers() {
   ]);
 }
 
+function refreshUserTablesNow() {
+  renderUsers();
+  renderSettingsUsers();
+}
+
 function renderSettings() {
   const groups = [
     ["courses", "Courses"],
@@ -2955,9 +2960,15 @@ function setCloudButtonBusy(action, busy) {
 
 function queueCloudSave() {
   const settings = getSheetSyncSettings();
-  if (!settings.auto || !settings.url || isCloudLoading) return;
+  if (!settings.auto || !settings.url) return;
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => syncCloudNow({ silent: true }), 600);
+  syncTimer = setTimeout(() => {
+    if (isCloudLoading) {
+      queueCloudSave();
+      return;
+    }
+    syncCloudNow({ silent: true });
+  }, 600);
 }
 
 function startPeriodicSheetSync() {
@@ -5080,13 +5091,14 @@ async function saveUser(e) {
     delete data.id;
     state.users.push({ id: id(), createdAt: data.updatedAt, ...data });
   }
+  save();
   clearUserForm(e.target.id);
   const title = document.getElementById("userFormTitle");
   if (title) title.textContent = "Add User";
   delete e.target.dataset.roleChanged;
   render();
-  save();
-  setSheetStatus("User saved. Syncing to cloud for other PC/mobile login...", "busy");
+  refreshUserTablesNow();
+  setSheetStatus(`User "${data.name || "Admin"}" saved locally. Cloud sync will finish in the background.`, "ok");
   showCloudReminderPopup("User saved. Cloud sync is running.");
 }
 
