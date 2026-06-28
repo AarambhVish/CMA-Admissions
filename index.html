@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260628-attendance-weekly-restore">
+  <link rel="stylesheet" href="styles.css?v=20260628-incremental-admission-pivots">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -106,7 +106,7 @@
 
     <section id="admissions" class="page">
       <div class="toolbar">
-        <button class="primary" data-fetch-cmafc-admissions>Fetch CMAFC D26 Admissions</button>
+        <button class="primary" data-fetch-cmafc-admissions>Update CMAFC D26 Admissions</button>
         <span class="bulk-help">Reads First Name, Last initial, Branch Location, Admission Date, and Student ID from your restricted Google Sheet through Apps Script.</span>
       </div>
       <div class="filters" id="admissionFilters"></div>
@@ -246,6 +246,20 @@
     <section id="reports" class="page">
       <div class="filters" id="reportFilters"></div>
       <div id="reportSummary" class="metric-grid"></div>
+      <div class="split">
+        <section class="panel">
+          <h2>Leads Pivot Summary</h2>
+          <div id="leadPivotReport" class="table-wrap"></div>
+        </section>
+        <section class="panel">
+          <h2>Admission Pivot Summary</h2>
+          <div id="admissionPivotReport" class="table-wrap"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Attendance Pivot Summary</h2>
+        <div id="attendancePivotReport" class="table-wrap"></div>
+      </section>
       <div class="split">
         <section class="panel">
           <h2>Source Effectiveness</h2>
@@ -537,6 +551,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260628-attendance-weekly-restore"></script>
+  <script src="app.js?v=20260628-incremental-admission-pivots"></script>
 </body>
 </html>

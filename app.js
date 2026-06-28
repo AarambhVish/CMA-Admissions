@@ -2369,10 +2369,74 @@ function renderReports() {
     metric("Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"),
     metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length)
   ].join("");
+  renderLeadPivotReport(leads);
+  renderAdmissionPivotReport();
+  renderAttendancePivotReport();
   renderGroupReport("sourceReport", leads, "source");
   renderGroupReport("branchReport", leads, "branch");
   renderAdminPerformance();
 }
+
+function renderLeadPivotReport(leads = filteredLeads("report")) {
+  const rows = pivotRows(leads, row => `${row.course || "Blank"}||${row.branch || "Blank"}`, (item, lead) => {
+    item.course = lead.course || "Blank";
+    item.branch = lead.branch || "Blank";
+    item.total += 1;
+    if (lead.status === "New Lead") item.newLeads += 1;
+    if (["Contacted", "Interested", "Prospectus Sent", "Demo Attended", "Follow-up Required"].includes(lead.status)) item.active += 1;
+    if (lead.status === "Converted / Admitted") item.converted += 1;
+    if (["Not Interested", "Lost Lead", "Not Reachable"].includes(lead.status)) item.lost += 1;
+  }, () => ({ course: "", branch: "", total: 0, newLeads: 0, active: 0, converted: 0, lost: 0 }));
+  rows.forEach(row => row.ratio = row.total ? `${Math.round(row.converted / row.total * 100)}%` : "0%");
+  table("leadPivotReport", rows, ["Course", "Branch", "Total", "New", "Active", "Converted", "Lost", "Ratio"], r => [r.course, r.branch, r.total, r.newLeads, r.active, r.converted, r.lost, r.ratio]);
+}
+
+function renderAdmissionPivotReport() {
+  const rows = pivotRows(admissionViewRows({ applyFilters: false }).filter(admissionRowMatchesReportFilters), row => `${admissionRowBranch(row) || "Blank"}||${row.batch || "Blank"}||${admissionRowCounsellor(row) || "Blank"}`, (item, row) => {
+    item.branch = admissionRowBranch(row) || "Blank";
+    item.batch = row.batch || "Blank";
+    item.counsellor = admissionRowCounsellor(row) || "Blank";
+    item.total += 1;
+    if (admissionFilterStatus(row) === "Converted / Admitted") item.admitted += 1;
+    else item.pending += 1;
+  }, () => ({ branch: "", batch: "", counsellor: "", total: 0, admitted: 0, pending: 0 }));
+  rows.forEach(row => row.ratio = row.total ? `${Math.round(row.admitted / row.total * 100)}%` : "0%");
+  table("admissionPivotReport", rows, ["Branch", "Batch", "Counsellor", "Total", "Admitted", "Yet to Admit", "Ratio"], r => [r.branch, r.batch, r.counsellor, r.total, r.admitted, r.pending, r.ratio]);
+}
+
+function renderAttendancePivotReport() {
+  const rows = pivotRows(attendanceRoster().filter(student => !student.archivedAt), student => `${student.batch || "Blank"}||${student.branch || "Blank"}`, (item, student) => {
+    item.batch = student.batch || "Blank";
+    item.branch = student.branch || "Blank";
+    item.students += 1;
+    const sessions = attendanceSessionsForBatch(student.batch, student.branch);
+    sessions.forEach(session => {
+      if (isBeforeStudentAdmission(student, session)) {
+        item.na += 1;
+        return;
+      }
+      const record = attendanceRecord(student.id, session.id);
+      if (record.present === false) item.absent += 1;
+      else item.present += 1;
+    });
+  }, () => ({ batch: "", branch: "", students: 0, present: 0, absent: 0, na: 0 }));
+  rows.forEach(row => {
+    const marked = row.present + row.absent;
+    row.attendance = marked ? `${Math.round(row.present / marked * 100)}%` : "0%";
+  });
+  table("attendancePivotReport", rows, ["Batch", "Branch", "Students", "Present", "Absent", "NA", "Attendance %"], r => [r.batch, r.branch, r.students, r.present, r.absent, r.na, r.attendance]);
+}
+
+function pivotRows(rows, keyFn, reducer, seedFn) {
+  const map = new Map();
+  rows.forEach(row => {
+    const key = keyFn(row);
+    if (!map.has(key)) map.set(key, seedFn());
+    reducer(map.get(key), row);
+  });
+  return [...map.values()].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b), undefined, { numeric: true, sensitivity: "base" }));
+}
+
 function renderGroupReport(idName, leads, key) {
   const rows = Object.entries(countBy(leads, key)).map(([name, total]) => {
     const group = leads.filter(l => (l[key] || "Blank") === name);
@@ -3868,8 +3932,8 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
       const result = importCmafcD26AdmissionRows(payload.rows || []);
       save();
       renderAdmissions();
-      setSheetStatus(`CMAFC D26 imported: ${result.created} new, ${result.updated} updated, ${result.skipped} skipped.`, "ok");
-      alert(`CMAFC D26 admissions fetched.\nNew records: ${result.created}\nUpdated records: ${result.updated}\nSkipped rows: ${result.skipped}`);
+      setSheetStatus(`CMAFC D26 update complete: ${result.created} new, ${result.existing} already saved, ${result.skipped} blank/skipped.`, "ok");
+      alert(`CMAFC D26 admissions updated.\nNew records added: ${result.created}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
     } catch (error) {
       setSheetStatus(`CMAFC D26 fetch failed: ${error.message}`, "error");
       alert(`CMAFC D26 fetch failed: ${error.message}`);
@@ -3896,7 +3960,7 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
 
 function importCmafcD26AdmissionRows(rows = []) {
   let created = 0;
-  let updated = 0;
+  let existing = 0;
   let skipped = 0;
   cleanupCmafcD26LeadsFromLeadList();
   rows.forEach((row, index) => {
@@ -3905,11 +3969,14 @@ function importCmafcD26AdmissionRows(rows = []) {
       skipped += 1;
       return;
     }
-    const admission = upsertCmafcD26AdmissionOnly(data);
-    if (admission.created) created += 1;
-    else updated += 1;
+    if (findExistingCmafcD26Admission(data)) {
+      existing += 1;
+      return;
+    }
+    createCmafcD26AdmissionOnly(data);
+    created += 1;
   });
-  return { created, updated, skipped };
+  return { created, existing, skipped };
 }
 
 function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
@@ -3979,14 +4046,17 @@ function clearAllLeadRecords() {
   return removed;
 }
 
-function upsertCmafcD26AdmissionOnly(data) {
-  const existing = state.admissions.find(item =>
+function findExistingCmafcD26Admission(data) {
+  return state.admissions.find(item =>
     normalizeAttendanceChoice(item.batch || "") === normalizeAttendanceChoice(data.batch) &&
     (
       (data.studentId && (item.studentId === data.studentId || item.receiptNumber === data.studentId)) ||
       normalizePersonName(item.studentName || [item.firstName, item.lastName].filter(Boolean).join(" ")) === normalizePersonName(data.name)
     )
   );
+}
+
+function createCmafcD26AdmissionOnly(data) {
   const counsellor = defaultCounsellorForBranch(data.branch, currentUser?.name || "Admin");
   const payload = {
     leadId: "",
@@ -4011,10 +4081,6 @@ function upsertCmafcD26AdmissionOnly(data) {
   if (data.branch && data.branch !== "Unassigned") addUnique(masters.branches, data.branch);
   addUnique(masters.batches, data.batch);
   addUnique(masters.attendanceBatches, data.batch);
-  if (existing) {
-    Object.assign(existing, { ...payload, id: existing.id });
-    return { created: false, admission: existing };
-  }
   const admission = { id: id(), ...payload };
   state.admissions.unshift(admission);
   return { created: true, admission };
