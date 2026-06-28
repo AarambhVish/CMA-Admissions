@@ -884,6 +884,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const removedLeads = clearAllLeadRecords();
   if (migratedCmafcLeads || removedLeads) save();
   render();
+  scheduleReportRefresh();
 });
 
 function renderTabs() {
@@ -896,6 +897,7 @@ function bindEvents() {
     if (!e.target.dataset.tab) return;
     activeTab = e.target.dataset.tab;
     render();
+    if (activeTab === "reports") scheduleReportRefresh();
   });
   document.getElementById("loginForm").addEventListener("submit", loginUser);
   document.getElementById("logoutBtn").addEventListener("click", logoutUser);
@@ -1012,6 +1014,14 @@ function render() {
   if (activeTab === "reports") renderReports();
   if (activeTab === "users") renderUsers();
   if (activeTab === "settings") renderSettings();
+}
+
+function scheduleReportRefresh() {
+  setTimeout(() => {
+    if (document.getElementById("reports")?.classList.contains("active")) {
+      renderReports();
+    }
+  }, 350);
 }
 
 function activeLeads() {
@@ -2418,12 +2428,14 @@ function renderTemplates() {
 function renderReports() {
   try {
     const leads = filteredLeads("report");
+    const admissionRows = admissionViewRows({ applyFilters: false }).filter(admissionRowMatchesReportFilters);
     const converted = leads.filter(l => l.status === "Converted / Admitted").length;
     document.getElementById("reportSummary").innerHTML = [
       metric("Total lead count", leads.length),
       metric("Conversion count", converted),
       metric("Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"),
-      metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length)
+      metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length),
+      metric("Admission records", admissionRows.length)
     ].join("");
     safeReportRender("leadPivotReport", () => renderLeadPivotReport(leads));
     safeReportRender("admissionPivotReport", renderAdmissionPivotReport);
@@ -4011,6 +4023,7 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
         saveToSheet({ silent: true });
       }
       renderAdmissions();
+      scheduleReportRefresh();
       localStorage.setItem(`${storeKey}.lastCmafcD26AutoUpdate`, new Date().toISOString());
       setSheetStatus(`CMAFC D26 update complete: ${result.created} new, ${result.existing} already saved, ${result.skipped} blank/skipped.`, "ok");
       if (!silent) alert(`CMAFC D26 admissions updated.\nNew records added: ${result.created}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
