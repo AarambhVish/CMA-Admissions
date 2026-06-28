@@ -284,7 +284,7 @@ textarea { width: 100%; resize: vertical; }
   gap: 10px; margin: 14px 0;
 }
 #attendanceFilters {
-  grid-template-columns: minmax(170px, 1.2fr) minmax(135px, .9fr) minmax(150px, .85fr) minmax(150px, .85fr) 42px;
+  grid-template-columns: minmax(155px, 1.2fr) minmax(125px, .9fr) minmax(170px, 1fr) minmax(105px, .65fr) 38px 38px;
   gap: 6px;
   margin: 6px 0 8px;
   align-items: stretch;
@@ -474,7 +474,8 @@ td.actions { white-space: nowrap; }
   color: var(--text);
 }
 .attendance-week-btn {
-  min-height: 42px;
+  min-height: 34px;
+  padding: 0;
   border-color: #2563eb;
   color: #1d4ed8;
   font-weight: 800;

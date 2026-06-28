@@ -1647,9 +1647,8 @@ function renderAttendance() {
 function currentAttendanceFilters() {
   const batch = document.getElementById("attendance-batch")?.value || "";
   const branch = document.getElementById("attendance-branch")?.value || "";
-  const fromDate = document.getElementById("attendance-from-date")?.value || attendanceDefaultStartDate(batch);
-  const toDate = document.getElementById("attendance-to-date")?.value || addDaysISO(fromDate, 6);
-  return { batch, branch, fromDate, toDate };
+  const fromDate = document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch);
+  return { batch, branch, fromDate, toDate: addDaysISO(fromDate, 6) };
 }
 
 function renderAttendanceFilters(values = currentAttendanceFilters()) {
@@ -1667,9 +1666,11 @@ function renderAttendanceFilters(values = currentAttendanceFilters()) {
   const batchChoices = attendanceBatchChoices();
   const batchSelect = `<select id="attendance-batch"><option value="">All batches</option>${batchChoices.map(v => `<option ${v === currentBatch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
   const branchSelect = `<select id="attendance-branch" ${canManageAllAttendance() ? "" : "disabled"}>${canManageAllAttendance() ? `<option value="">All branches</option>` : ""}${branchOptions.map(v => `<option ${v === currentBranch ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}</select>`;
-  const fromInput = `<label class="attendance-start-label">From Date <input id="attendance-from-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`;
-  const toInput = `<label class="attendance-start-label">To Date <input id="attendance-to-date" type="date" value="${escapeAttr(currentEndDate)}"></label>`;
-  el.innerHTML = [batchSelect, branchSelect, fromInput, toInput].join("");
+  const startInput = `<label class="attendance-start-label">Week From <input id="attendance-start-date" type="date" value="${escapeAttr(currentStartDate)}"></label>`;
+  const statusSelect = `<select id="attendance-status-filter"><option value="">All P / A</option><option value="present" ${selectedAttendanceStatusFilter() === "present" ? "selected" : ""}>Only P</option><option value="absent" ${selectedAttendanceStatusFilter() === "absent" ? "selected" : ""}>Only A</option></select>`;
+  const prevButton = `<button class="attendance-week-btn" type="button" data-attendance-week="prev">‹</button>`;
+  const nextButton = `<button class="attendance-week-btn" type="button" data-attendance-week="next">›</button>`;
+  el.innerHTML = [batchSelect, branchSelect, startInput, statusSelect, prevButton, nextButton].join("");
 }
 
 function selectedAttendanceStatusFilter() {
@@ -1718,11 +1719,11 @@ function attendanceSortValue(student, field) {
 }
 
 function selectedAttendanceStartDate(batch = selectedAttendanceBatch()) {
-  return document.getElementById("attendance-from-date")?.value || attendanceDefaultStartDate(batch);
+  return document.getElementById("attendance-start-date")?.value || attendanceDefaultStartDate(batch);
 }
 
 function selectedAttendanceEndDate(batch = selectedAttendanceBatch()) {
-  return document.getElementById("attendance-to-date")?.value || addDaysISO(selectedAttendanceStartDate(batch), 6);
+  return addDaysISO(selectedAttendanceStartDate(batch), 6);
 }
 
 function attendanceDefaultStartDate(batch = "") {
@@ -2442,7 +2443,6 @@ function renderSettings() {
         <div id="settingsUserTabAccess" class="access-list"></div>
         <p class="bulk-help">For a new user, blank password becomes their first name. While editing, blank keeps the old password.</p>
         <button class="primary">Save Admin</button>
-        <button type="button" data-clear-user-form="settingsUserForm">Add New Admin</button>
       </form>
       <div id="settingsUserList" class="table-wrap"></div>
     </section>
@@ -5680,7 +5680,7 @@ function routeActions(e) {
 }
 
 function routeSelectActions(e) {
-  if (["attendance-batch", "attendance-branch", "attendance-from-date", "attendance-to-date"].includes(e.target.id)) {
+  if (["attendance-batch", "attendance-branch", "attendance-status-filter"].includes(e.target.id)) {
     renderAttendance();
     return;
   }
@@ -5870,7 +5870,7 @@ function archiveAdmissionRow(recordKey) {
 }
 
 function routeAttendanceFilterInputs(e) {
-  if (["attendance-from-date", "attendance-to-date"].includes(e.target.id)) {
+  if (e.target.id === "attendance-start-date") {
     renderAttendance();
   }
 }
