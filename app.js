@@ -1618,20 +1618,30 @@ function admissionCounsellorCell(row) {
 }
 
 function renderAttendance() {
-  prepareAttendanceForms();
-  const filters = currentAttendanceFilters();
-  renderAttendanceFilters(filters);
-  const selectedBatch = filters.batch;
-  const selectedBranch = filters.branch;
-  const statusFilter = selectedAttendanceStatusFilter();
-  const batchGroupFilter = selectedAttendanceBatchGroupFilter();
-  const sortField = selectedAttendanceSortField();
-  const sortDirection = selectedAttendanceSortDirection();
-  const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
-  const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
-    if (!selectedBranch || selectedBatch) return true;
-    return sameAttendanceChoice(attendanceBatchLocation(batch) || "Unassigned", selectedBranch);
-  }).map(batch => {
+  try {
+    prepareAttendanceForms();
+    const filters = currentAttendanceFilters();
+    renderAttendanceFilters(filters);
+    const selectedBatch = filters.batch;
+    const selectedBranch = filters.branch;
+    const statusFilter = selectedAttendanceStatusFilter();
+    const batchGroupFilter = selectedAttendanceBatchGroupFilter();
+    const sortField = selectedAttendanceSortField();
+    const sortDirection = selectedAttendanceSortDirection();
+    const batches = selectedBatch ? [selectedBatch] : attendanceBatchChoices();
+    const sections = (batches.length ? batches : ["Unassigned"]).filter(batch => {
+      if (!selectedBranch || selectedBatch) return true;
+      return sameAttendanceChoice(attendanceBatchLocation(batch) || "Unassigned", selectedBranch);
+    }).map(batch => safeAttendanceSection(batch, selectedBranch, batchGroupFilter, statusFilter, sortField, sortDirection));
+    renderAttendanceGrid(sections.length ? sections : [safeAttendanceSection("Unassigned", selectedBranch, batchGroupFilter, statusFilter, sortField, sortDirection)]);
+  } catch (error) {
+    console.error(error);
+    renderAttendanceFallback(error);
+  }
+}
+
+function safeAttendanceSection(batch, selectedBranch, batchGroupFilter, statusFilter, sortField, sortDirection) {
+  try {
     const branch = attendanceBatchLocation(batch) || selectedBranch || "";
     const sessions = attendanceRangeSessions(batch, branch);
     const students = sortAttendanceStudents(attendanceRoster()
@@ -1640,8 +1650,48 @@ function renderAttendance() {
       .filter(student => !batchGroupFilter || student.batchGroup === batchGroupFilter)
       .filter(student => attendanceStudentMatchesStatus(student, sessions, statusFilter)), sortField, sortDirection);
     return { batch, branch, students, sessions };
-  });
-  renderAttendanceGrid(sections);
+  } catch (error) {
+    console.error(error);
+    const branch = selectedBranch || "";
+    return { batch, branch, students: [], sessions: attendanceDraftWeekSessions(batch, branch) };
+  }
+}
+
+function attendanceDraftWeekSessions(batch, branch = "") {
+  const start = selectedAttendanceStartDate(batch);
+  return dateRangeList(start, addDaysISO(start, 6)).map(date => ({
+    id: `draft|${encodeURIComponent(batch || "Unassigned")}|${date}`,
+    draft: true,
+    batch,
+    branch,
+    date,
+    subject: "",
+    prof: ""
+  }));
+}
+
+function renderAttendanceFallback(error) {
+  const filters = document.getElementById("attendanceFilters");
+  const grid = document.getElementById("attendanceGrid");
+  if (filters) {
+    const batches = attendanceBatchChoices();
+    filters.innerHTML = `
+      <select id="attendance-batch"><option value="">All batches</option>${batches.map(batch => `<option>${escapeHtml(batch)}</option>`).join("")}</select>
+      <select id="attendance-branch"><option value="">All branches</option>${attendanceBranchChoices().map(branch => `<option>${escapeHtml(branch)}</option>`).join("")}</select>
+      <label class="attendance-start-label">Week From <input id="attendance-start-date" type="date" value="${escapeAttr(fridayOfWeek(todayDate()))}"></label>
+      <select id="attendance-status-filter"><option value="">All P / A</option><option value="present">Only P</option><option value="absent">Only A</option></select>
+      <button class="attendance-week-btn" type="button" data-attendance-week="prev">&lt;</button>
+      <button class="attendance-week-btn" type="button" data-attendance-week="next">&gt;</button>`;
+  }
+  if (grid) {
+    const batches = attendanceBatchChoices();
+    grid.innerHTML = (batches.length ? batches : ["Unassigned"]).map(batch => renderAttendanceTable({
+      batch,
+      branch: attendanceBatchLocation(batch) || "",
+      students: [],
+      sessions: attendanceDraftWeekSessions(batch, attendanceBatchLocation(batch) || "")
+    })).join("") + `<p class="warning">Attendance recovered in fallback mode. ${escapeHtml(error?.message || "")}</p>`;
+  }
 }
 
 function currentAttendanceFilters() {
@@ -2361,20 +2411,38 @@ function renderTemplates() {
 }
 
 function renderReports() {
-  const leads = filteredLeads("report");
-  const converted = leads.filter(l => l.status === "Converted / Admitted").length;
-  document.getElementById("reportSummary").innerHTML = [
-    metric("Total lead count", leads.length),
-    metric("Conversion count", converted),
-    metric("Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"),
-    metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length)
-  ].join("");
-  renderLeadPivotReport(leads);
-  renderAdmissionPivotReport();
-  renderAttendancePivotReport();
-  renderGroupReport("sourceReport", leads, "source");
-  renderGroupReport("branchReport", leads, "branch");
-  renderAdminPerformance();
+  try {
+    const leads = filteredLeads("report");
+    const converted = leads.filter(l => l.status === "Converted / Admitted").length;
+    document.getElementById("reportSummary").innerHTML = [
+      metric("Total lead count", leads.length),
+      metric("Conversion count", converted),
+      metric("Conversion ratio", leads.length ? `${Math.round(converted / leads.length * 100)}%` : "0%"),
+      metric("Follow-up count", state.followups.filter(f => leads.some(l => l.id === f.leadId)).length)
+    ].join("");
+    safeReportRender("leadPivotReport", () => renderLeadPivotReport(leads));
+    safeReportRender("admissionPivotReport", renderAdmissionPivotReport);
+    safeReportRender("attendancePivotReport", renderAttendancePivotReport);
+    safeReportRender("sourceReport", () => renderGroupReport("sourceReport", leads, "source"));
+    safeReportRender("branchReport", () => renderGroupReport("branchReport", leads, "branch"));
+    safeReportRender("adminPerformance", renderAdminPerformance);
+  } catch (error) {
+    console.error(error);
+    ["leadPivotReport", "admissionPivotReport", "attendancePivotReport", "sourceReport", "branchReport", "adminPerformance"].forEach(idName => {
+      const target = document.getElementById(idName);
+      if (target) target.innerHTML = `<p class="warning">Report could not load: ${escapeHtml(error.message || error)}</p>`;
+    });
+  }
+}
+
+function safeReportRender(idName, renderer) {
+  try {
+    renderer();
+  } catch (error) {
+    console.error(error);
+    const target = document.getElementById(idName);
+    if (target) target.innerHTML = `<p class="warning">Report could not load: ${escapeHtml(error.message || error)}</p>`;
+  }
 }
 
 function renderLeadPivotReport(leads = filteredLeads("report")) {
@@ -5287,7 +5355,8 @@ function clearUserForm(formId) {
 
 function setMultiSelectValues(select, values = []) {
   if (!select) return;
-  [...select.options].forEach(option => {
+  const options = select.options ? [...select.options] : [];
+  options.forEach(option => {
     option.selected = values.includes(option.value);
   });
 }
