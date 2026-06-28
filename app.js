@@ -204,6 +204,8 @@ let admissionSheetPayload = null;
 let syncAdmissionsAfterLegacy = false;
 let admissionSort = { key: "status", direction: "asc" };
 let tableSorts = {};
+let cmafcAutoFetchRunning = false;
+let cmafcAutoFetchTimer = null;
 
 function id() { return Math.random().toString(36).slice(2, 10); }
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -1002,7 +1004,10 @@ function render() {
   renderFilters();
   if (activeTab === "leads") renderLeadTable();
   if (activeTab === "archive") renderArchive();
-  if (activeTab === "admissions") renderAdmissions();
+  if (activeTab === "admissions") {
+    renderAdmissions();
+    scheduleCmafcD26AutoUpdate();
+  }
   if (activeTab === "attendance") renderAttendance();
   if (activeTab === "reports") renderReports();
   if (activeTab === "users") renderUsers();
@@ -3974,13 +3979,15 @@ function confirmImportAdmissionSheet() {
   alert(`Admissions updated.\nMatched leads: ${result.matched}\nNew admitted leads: ${result.created}\nAdmission records created/updated: ${result.admissions}\nSkipped rows: ${result.skipped}`);
 }
 
-function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
+function fetchCmafcD26Admissions({ token = null, retried = false, silent = false, auto = false } = {}) {
   if (!isSuperAdmin() && !isLeadManager()) {
-    alert("Only Super Admin or Lead Manager can fetch admission sheet data.");
+    if (!silent) alert("Only Super Admin or Lead Manager can fetch admission sheet data.");
     return;
   }
+  if (auto && cmafcAutoFetchRunning) return;
+  if (auto) cmafcAutoFetchRunning = true;
   const callbackName = `crmCmafcD26_${Date.now()}`;
-  setSheetStatus("Fetching CMAFC D26 admission data...", "busy");
+  if (!silent) setSheetStatus("Fetching CMAFC D26 admission data...", "busy");
   window[callbackName] = payload => {
     try {
       delete window[callbackName];
@@ -3988,6 +3995,7 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
       if (!payload?.ok) {
         if (!retried && /unauthor/i.test(payload?.error || "")) {
           localStorage.removeItem(`${storeKey}.cmafcAdmissionToken`);
+          if (silent || auto) return;
           const nextToken = prompt("Enter CMAFC D26 admission sheet secret token:");
           if (nextToken) {
             localStorage.setItem(`${storeKey}.cmafcAdmissionToken`, nextToken.trim());
@@ -3998,13 +4006,19 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
         throw new Error(payload?.error || "Could not fetch CMAFC D26.");
       }
       const result = importCmafcD26AdmissionRows(payload.rows || []);
-      save();
+      if (result.created) {
+        save();
+        saveToSheet({ silent: true });
+      }
       renderAdmissions();
+      localStorage.setItem(`${storeKey}.lastCmafcD26AutoUpdate`, new Date().toISOString());
       setSheetStatus(`CMAFC D26 update complete: ${result.created} new, ${result.existing} already saved, ${result.skipped} blank/skipped.`, "ok");
-      alert(`CMAFC D26 admissions updated.\nNew records added: ${result.created}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
+      if (!silent) alert(`CMAFC D26 admissions updated.\nNew records added: ${result.created}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
     } catch (error) {
       setSheetStatus(`CMAFC D26 fetch failed: ${error.message}`, "error");
-      alert(`CMAFC D26 fetch failed: ${error.message}`);
+      if (!silent) alert(`CMAFC D26 fetch failed: ${error.message}`);
+    } finally {
+      if (auto) cmafcAutoFetchRunning = false;
     }
   };
   const script = document.createElement("script");
@@ -4020,10 +4034,24 @@ function fetchCmafcD26Admissions({ token = null, retried = false } = {}) {
   script.onerror = () => {
     delete window[callbackName];
     document.getElementById(callbackName)?.remove();
-    setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment and /exec access.", "error");
-    alert("CMAFC D26 fetch failed. Confirm Apps Script is deployed as Web App: Execute as Me, Who has access Anyone, and URL ends with /exec.");
+    if (auto) cmafcAutoFetchRunning = false;
+    if (!silent) {
+      setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment and /exec access.", "error");
+      alert("CMAFC D26 fetch failed. Confirm Apps Script is deployed as Web App: Execute as Me, Who has access Anyone, and URL ends with /exec.");
+    }
   };
   document.body.appendChild(script);
+}
+
+function scheduleCmafcD26AutoUpdate() {
+  if (!localStorage.getItem(`${storeKey}.cmafcAdmissionToken`)) return;
+  if (!isSuperAdmin() && !isLeadManager()) return;
+  const lastRun = Date.parse(localStorage.getItem(`${storeKey}.lastCmafcD26AutoUpdate`) || "0") || 0;
+  if (Date.now() - lastRun < 5 * 60 * 1000) return;
+  clearTimeout(cmafcAutoFetchTimer);
+  cmafcAutoFetchTimer = setTimeout(() => {
+    fetchCmafcD26Admissions({ silent: true, auto: true });
+  }, 800);
 }
 
 function importCmafcD26AdmissionRows(rows = []) {
