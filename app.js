@@ -986,11 +986,16 @@ function hydrateSelects() {
 }
 function fillSelects(name, values) {
   document.querySelectorAll(`[name="${name}"]`).forEach(select => {
+    if (!isSelectElement(select)) return;
     const current = select.value;
     const finalValues = ["branch", "batch"].includes(name) ? ["Unassigned", ...values.filter(v => v !== "Unassigned")] : values;
     select.innerHTML = finalValues.map(v => `<option>${v}</option>`).join("");
     if (finalValues.includes(current)) select.value = current;
   });
+}
+
+function isSelectElement(element) {
+  return Boolean(element && element.tagName === "SELECT" && element.options);
 }
 
 function render() {
@@ -1154,7 +1159,7 @@ function clearFilterValues(prefix) {
 
 function setFilterValue(prefix, key, value) {
   const el = document.getElementById(`${prefix}-${key}`);
-  if (el && [...el.options].some(option => option.value === value)) el.value = value;
+  if (isSelectElement(el) && [...el.options].some(option => option.value === value)) el.value = value;
 }
 
 function renderFilters() {
@@ -1183,7 +1188,7 @@ function buildFilters(containerId, prefix) {
     el.innerHTML = html;
     Object.entries(currentValues).forEach(([key, value]) => {
       const input = document.getElementById(`${prefix}-${key}`);
-      if (input && [...input.options].some(option => option.value === value)) input.value = value;
+      if (isSelectElement(input) && [...input.options].some(option => option.value === value)) input.value = value;
     });
     if (!el.dataset.ready) {
       el.dataset.ready = "1";
@@ -1872,7 +1877,7 @@ function prepareAttendanceForms() {
   if (bulkBatch) {
     const current = bulkBatch.value;
     bulkBatch.innerHTML = `<option value="">Select attendance batch</option>${attendanceBatchChoices().map(batch => `<option>${escapeHtml(batch)}</option>`).join("")}`;
-    if (current && [...bulkBatch.options].some(option => option.value === current)) bulkBatch.value = current;
+    if (current && isSelectElement(bulkBatch) && [...bulkBatch.options].some(option => option.value === current)) bulkBatch.value = current;
   }
   if (sessionForm) {
     if (sessionForm.elements.batch) sessionForm.elements.batch.innerHTML = batchOptions;
@@ -5438,7 +5443,8 @@ function clearUserForm(formId) {
 
 function setMultiSelectValues(select, values = []) {
   if (!select) return;
-  const options = select.options ? [...select.options] : [];
+  if (!isSelectElement(select)) return;
+  const options = [...select.options];
   options.forEach(option => {
     option.selected = values.includes(option.value);
   });
