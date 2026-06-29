@@ -223,6 +223,7 @@ function load() {
   }
   const loaded = JSON.parse(raw);
   normalizeStateDefaults(loaded);
+  restoreStickyAdmissions(loaded);
   localStorage.setItem(storeKey, JSON.stringify(loaded));
   if (!loaded.planningSeeded) {
     ensureProvidedPlanning(loaded);
@@ -263,6 +264,7 @@ function mergeCloudState(localData = {}, cloudData = {}) {
   merged.professorDatabaseSeeded = merged.professorDatabaseSeeded || incoming.professorDatabaseSeeded;
   merged.planningSeeded = merged.planningSeeded || incoming.planningSeeded;
   normalizeStateDefaults(merged);
+  restoreStickyAdmissions(merged);
   return merged;
 }
 
@@ -549,6 +551,7 @@ function utf8Bytes(text) {
 
 function save() {
   state.masters = masters;
+  if (state.admissions?.length) saveStickyAdmissions();
   stripSensitiveData(state);
   writeLocalSafetyBackup("save");
   localStorage.setItem(storeKey, JSON.stringify(state));
@@ -3271,6 +3274,7 @@ function loadFromSheet({ silent = false } = {}) {
           masters = state.masters || masters;
           cleanupCmafcD26LeadsFromLeadList();
           clearAllLeadRecords();
+          saveStickyAdmissions();
           localStorage.setItem(storeKey, JSON.stringify(state));
           writeLocalSafetyBackup("cloud merge");
           isCloudLoading = false;
@@ -4019,6 +4023,7 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
       }
       const result = importCmafcD26AdmissionRows(payload.rows || []);
       if (result.created) {
+        saveStickyAdmissions();
         save();
         saveToSheet({ silent: true });
       }
@@ -4086,6 +4091,43 @@ function importCmafcD26AdmissionRows(rows = []) {
     created += 1;
   });
   return { created, existing, skipped };
+}
+
+function stickyAdmissionKey(admission = {}) {
+  return [
+    normalizeAttendanceChoice(admission.batch || ""),
+    String(admission.studentId || admission.receiptNumber || "").trim().toLowerCase(),
+    normalizePersonName(admission.studentName || [admission.firstName, admission.lastName].filter(Boolean).join("")),
+    normalizeAttendanceChoice(admission.branch || "")
+  ].join("|");
+}
+
+function saveStickyAdmissions() {
+  const sticky = state.admissions
+    .filter(admission => normalizeAttendanceChoice(admission.batch || "") === normalizeAttendanceChoice("CMAFC D26"))
+    .filter(admission => admission.studentId || admission.receiptNumber || admission.studentName || admission.firstName);
+  localStorage.setItem(`${storeKey}.stickyAdmissions`, JSON.stringify(sticky));
+}
+
+function restoreStickyAdmissions(targetState = state) {
+  let sticky = [];
+  try {
+    sticky = JSON.parse(localStorage.getItem(`${storeKey}.stickyAdmissions`) || "[]");
+  } catch {
+    sticky = [];
+  }
+  if (!Array.isArray(sticky) || !sticky.length) return 0;
+  normalizeStateDefaults(targetState);
+  const existingKeys = new Set(targetState.admissions.map(stickyAdmissionKey));
+  let restored = 0;
+  sticky.forEach(admission => {
+    const key = stickyAdmissionKey(admission);
+    if (!key || existingKeys.has(key)) return;
+    targetState.admissions.unshift({ ...admission, id: admission.id || id() });
+    existingKeys.add(key);
+    restored += 1;
+  });
+  return restored;
 }
 
 function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
