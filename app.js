@@ -13,6 +13,11 @@ const fixedCmafcAdmissionWebAppUrl = [
 ].join("");
 const fixedDatabaseSpreadsheetUrl = "";
 const cloudReminderMinutes = 10;
+const admissionFetchConfigs = {
+  foundation: { label: "CMAFC D26", tabs: ["CMAFC D26"], course: "CMA Foundation", batch: "CMAFC D26", includeTwelfth: true },
+  inter: { label: "Inter D26", tabs: ["Inter D26"], course: "CMA Intermediate", batch: "Inter D26", includeTwelfth: false },
+  final: { label: "Final D26/D27", tabs: ["Final D26", "Final D27"], course: "CMA Final", batch: "Final D26/D27", includeTwelfth: false }
+};
 const tabs = [
   ["leads", "Leads"],
   ["admissions", "Admission"],
@@ -927,6 +932,7 @@ function bindEvents() {
   document.getElementById("referenceType").addEventListener("change", updateReferenceFields);
   document.getElementById("followupForm").addEventListener("submit", saveFollowup);
   document.getElementById("admissionForm").addEventListener("submit", saveAdmission);
+  document.getElementById("queryReportForm")?.addEventListener("submit", runQueryReport);
   document.getElementById("attendanceBatchForm").addEventListener("submit", saveAttendanceBatch);
   document.getElementById("attendanceSessionForm").addEventListener("submit", saveAttendanceSession);
   document.getElementById("assignAdminForm").addEventListener("submit", saveAdminAssignment);
@@ -1292,6 +1298,7 @@ function admissionViewRows({ applyFilters = true } = {}) {
     recordSource: "Admission",
     leadStatus: row.status || "Converted / Admitted",
     admissionDisplayStatus: "Converted / Admitted",
+    twelfthPercent: row.twelfthPercent || row.customFields?.twelfthPercent || row.customFields?.["12th %"] || "",
     counsellor: admissionRowCounsellor(row),
     assignedTo: admissionRowCounsellor(row)
   }));
@@ -1309,7 +1316,8 @@ function admissionViewRows({ applyFilters = true } = {}) {
     .filter(lead => lead.status !== "Converted / Admitted")
     .forEach(lead => pushUnique({
       ...lead,
-      batch: lead.batch || "Unassigned",
+    batch: lead.batch || "Unassigned",
+      twelfthPercent: lead.twelfthPercent || lead.customFields?.twelfthPercent || lead.customFields?.["12th %"] || "",
       counsellor: admissionRowCounsellor(lead),
       assignedTo: admissionRowCounsellor(lead),
       recordSource: "Lead",
@@ -1345,6 +1353,7 @@ function admissionSortValue(row, key) {
     batch: row.batch || "",
     branch: row.branch || "",
     studentId: row.studentId || row.receiptNumber || "",
+    twelfthPercent: row.twelfthPercent || "",
     status: admissionFilterStatus(row),
     leadStatus: row.leadStatus || "",
     admissionDate: row.admissionDate || "",
@@ -1502,6 +1511,7 @@ function attendanceStudentToAdmissionView(student, statusFilter) {
     batch: student.batch || "Unassigned",
     branch,
     admissionDate: student.admissionDate || "",
+    twelfthPercent: student.twelfthPercent || linkedLead?.twelfthPercent || linkedLead?.customFields?.twelfthPercent || linkedLead?.customFields?.["12th %"] || "",
     feesAgreed: "",
     feesPaid: "",
     balance: "",
@@ -1529,6 +1539,7 @@ function renderAdmissions() {
     ["batch", "Batch"],
     ["branch", "Branch"],
     ["studentId", "Student ID"],
+    ["twelfthPercent", "12th %"],
     ["status", "Admission Status"],
     ["leadStatus", "Lead Status"],
     ["admissionDate", "Admission Date"],
@@ -1550,6 +1561,7 @@ function renderAdmissions() {
       <td>${escapeHtml(row.batch || "")}</td>
       <td>${escapeHtml(row.branch || "")}</td>
       <td>${escapeHtml(row.studentId || row.receiptNumber || "")}</td>
+      <td>${escapeHtml(row.twelfthPercent || "")}</td>
       <td>${statusText(row.admissionDisplayStatus || "")}</td>
       <td>${admissionLeadStatusCell(row)}</td>
       <td>${admissionDateCell(row)}</td>
@@ -1595,6 +1607,7 @@ function renderAdmissions() {
     ["batch", "Batch"],
     ["branch", "Branch"],
     ["studentId", "Student ID"],
+    ["twelfthPercent", "12th %"],
     ["status", "Admission Status"],
     ["leadStatus", "Lead Status"],
     ["admissionDate", "Admission Date"],
@@ -1617,6 +1630,7 @@ function renderAdmissions() {
       <td>${escapeHtml(row.batch || "")}</td>
       <td>${escapeHtml(row.branch || "")}</td>
       <td>${escapeHtml(row.studentId || row.receiptNumber || "")}</td>
+      <td>${escapeHtml(row.twelfthPercent || "")}</td>
       <td>${statusText(row.admissionDisplayStatus || "")}</td>
       <td>${admissionLeadStatusCell(row)}</td>
       <td>${admissionDateCell(row)}</td>
@@ -2458,6 +2472,96 @@ function renderReports() {
       if (target) target.innerHTML = `<p class="warning">Report could not load: ${escapeHtml(error.message || error)}</p>`;
     });
   }
+}
+
+function runQueryReport(e) {
+  e?.preventDefault();
+  renderQueryReport(document.getElementById("queryReportInput")?.value || "");
+}
+
+function renderQueryReport(command = "") {
+  const targetId = "queryReportOutput";
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const text = String(command || "").trim().toLowerCase();
+  if (!text) {
+    target.innerHTML = "<p class='muted'>Type a report command first.</p>";
+    return;
+  }
+  const dataset = queryDataset(text);
+  const rows = dataset.rows;
+  if (!rows.length) {
+    target.innerHTML = "<p class='muted'>No records found for this report.</p>";
+    return;
+  }
+  const groupKey = queryGroupKey(text);
+  if (!groupKey) {
+    table(targetId, rows.slice(0, 300), dataset.headings, dataset.mapRow);
+    return;
+  }
+  const grouped = pivotRows(rows, row => String(dataset.value(row, groupKey) || "Blank"), (item, row) => {
+    item.name = String(dataset.value(row, groupKey) || "Blank");
+    item.total += 1;
+    if (dataset.kind === "attendance") {
+      attendanceSessionsForBatch(row.batch, row.branch).forEach(session => {
+        item.sessions += 1;
+        if (isBeforeStudentAdmission(row, session)) item.na += 1;
+        else if (attendanceRecord(row.id, session.id).present === false) item.absent += 1;
+        else item.present += 1;
+      });
+    } else if (dataset.isConverted(row)) {
+      item.converted += 1;
+    }
+  }, () => ({ name: "", total: 0, converted: 0, sessions: 0, present: 0, absent: 0, na: 0 }));
+  if (dataset.kind === "attendance") {
+    table(targetId, grouped, [titleCase(groupKey), "Students", "Sessions", "Present", "Absent", "NA"], row => [escapeHtml(row.name), row.total, row.sessions, row.present, row.absent, row.na]);
+    return;
+  }
+  grouped.forEach(row => row.ratio = row.total ? `${Math.round(row.converted / row.total * 100)}%` : "0%");
+  table(targetId, grouped, [titleCase(groupKey), "Total", "Converted", "Ratio"], row => [escapeHtml(row.name), row.total, row.converted, row.ratio]);
+}
+
+function queryDataset(text) {
+  if (/attendance|present|absent/.test(text)) {
+    return {
+      kind: "attendance",
+      rows: attendanceRoster().filter(student => !student.archivedAt),
+      headings: ["Student", "Last", "Batch", "Branch", "Admission Date", "Student ID"],
+      mapRow: student => [escapeHtml(student.firstName || ""), escapeHtml(student.lastName || student.lastInitial || ""), escapeHtml(student.batch || ""), escapeHtml(student.branch || ""), escapeHtml(formatDate(student.admissionDate || "")), escapeHtml(student.studentId || "")],
+      value: (student, key) => key === "name" ? student.firstName : student[key],
+      isConverted: () => false
+    };
+  }
+  if (/admission|admitted|student id|student/.test(text)) {
+    return {
+      kind: "admissions",
+      rows: admissionViewRows({ applyFilters: false }).filter(admissionRowMatchesReportFilters),
+      headings: ["Student", "Course", "Batch", "Branch", "Student ID", "12th %", "Status", "Counsellor"],
+      mapRow: row => [escapeHtml(displayLeadName(row) || row.studentName || ""), escapeHtml(row.course || ""), escapeHtml(row.batch || ""), escapeHtml(admissionRowBranch(row) || ""), escapeHtml(row.studentId || row.receiptNumber || ""), escapeHtml(row.twelfthPercent || ""), statusText(admissionFilterStatus(row)), escapeHtml(admissionRowCounsellor(row) || "")],
+      value: (row, key) => key === "branch" ? admissionRowBranch(row) : key === "admin" || key === "counsellor" ? admissionRowCounsellor(row) : key === "status" ? admissionFilterStatus(row) : row[key],
+      isConverted: row => admissionFilterStatus(row) === "Converted / Admitted"
+    };
+  }
+  return {
+    kind: "leads",
+    rows: filteredLeads("report"),
+    headings: ["Student", "Mobile", "Course", "Attempt", "Branch", "Status", "Admin", "Source"],
+    mapRow: lead => [escapeHtml(displayLeadName(lead)), escapeHtml(lead.studentMobile || ""), escapeHtml(lead.course || ""), escapeHtml(lead.attempt || ""), escapeHtml(lead.branch || ""), statusText(lead.status || ""), escapeHtml(lead.assignedTo || ""), escapeHtml(lead.source || "")],
+    value: (lead, key) => key === "admin" || key === "counsellor" ? lead.assignedTo : lead[key],
+    isConverted: lead => lead.status === "Converted / Admitted"
+  };
+}
+
+function queryGroupKey(text) {
+  const matches = [
+    ["branch", /by branch|branch wise|branch-wise|location/],
+    ["course", /by course|course wise|course-wise/],
+    ["batch", /by batch|batch wise|batch-wise/],
+    ["status", /by status|status wise|status-wise/],
+    ["source", /by source|source wise|source-wise/],
+    ["admin", /by admin|admin wise|counsellor|counselor/]
+  ];
+  return matches.find(([, pattern]) => pattern.test(text))?.[0] || "";
 }
 
 function safeReportRender(idName, renderer) {
@@ -3315,14 +3419,18 @@ function loadFromSheet({ silent = false } = {}) {
 }
 
 function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
-  alert("Old data import is hidden/disabled in this software.");
-  return;
   if (!isSuperAdmin() && !isLeadManager()) {
     alert("Only Super Admin or Lead Manager can update leads from the old Google Sheet.");
     return;
   }
   if (!skipConfirm && !confirm("Load old Google Sheet columns for mapping before import? No CRM data will change until you confirm the final import.")) return;
   const settings = getSheetSyncSettings();
+  if (!settings.token) {
+    const token = prompt("Enter leads Google Sheet secret token:");
+    if (!token) return;
+    setSheetSyncSettings({ token: token.trim() });
+    settings.token = token.trim();
+  }
   const callbackName = `crmLegacySheet_${Date.now()}`;
   setSheetStatus("Reading old Google Sheet...");
   window[callbackName] = payload => {
@@ -3342,7 +3450,9 @@ function updateFromOldGoogleSheet({ skipConfirm = false } = {}) {
   };
   const script = document.createElement("script");
   script.id = callbackName;
-  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}mode=legacy&callback=${callbackName}&t=${Date.now()}`;
+  const params = new URLSearchParams({ mode: "legacy", callback: callbackName, t: String(Date.now()) });
+  if (settings.token) params.set("token", settings.token);
+  script.src = `${settings.url}${settings.url.includes("?") ? "&" : "?"}${params.toString()}`;
   script.onerror = () => {
     setSheetStatus("Old Google Sheet update failed. Check Apps Script access.");
     delete window[callbackName];
@@ -3922,6 +4032,7 @@ function admissionMappingOptions() {
     ["batch", "Batch"],
     ["branch", "Branch / Location"],
     ["admissionDate", "Admission Date"],
+    ["twelfthPercent", "12th %"],
     ["feesAgreed", "Fees Agreed"],
     ["feesPaid", "Fees Paid"],
     ["paymentMode", "Payment Mode"],
@@ -3944,6 +4055,7 @@ function guessAdmissionField(header) {
   if (/batch/.test(label)) return "batch";
   if (/branch|location|centre|center|address/.test(label)) return "branch";
   if (/admission.*date|date.*admission|joined.*date|date/.test(label)) return "admissionDate";
+  if (/12th|twelfth|hsc|xii/.test(label) && /%|percent|percentage|marks/.test(label)) return "twelfthPercent";
   if (/agreed|total.*fees|fees/.test(label)) return "feesAgreed";
   if (/paid|received|amount/.test(label)) return "feesPaid";
   if (/mode|payment/.test(label)) return "paymentMode";
@@ -4000,15 +4112,20 @@ function confirmImportAdmissionSheet() {
   alert(`Admissions updated.\nMatched leads: ${result.matched}\nNew admitted leads: ${result.created}\nAdmission records created/updated: ${result.admissions}\nSkipped rows: ${result.skipped}`);
 }
 
-function fetchCmafcD26Admissions({ token = null, retried = false, silent = false, auto = false } = {}) {
+function fetchCmafcD26Admissions(options = {}) {
+  return fetchAdmissionTab("foundation", options);
+}
+
+function fetchAdmissionTab(kind = "foundation", { token = null, retried = false, silent = false, auto = false } = {}) {
+  const config = admissionFetchConfigs[kind] || admissionFetchConfigs.foundation;
   if (!isSuperAdmin() && !isLeadManager()) {
     if (!silent) alert("Only Super Admin or Lead Manager can fetch admission sheet data.");
     return;
   }
   if (auto && cmafcAutoFetchRunning) return;
   if (auto) cmafcAutoFetchRunning = true;
-  const callbackName = `crmCmafcD26_${Date.now()}`;
-  if (!silent) setSheetStatus("Fetching CMAFC D26 admission data...", "busy");
+  const callbackName = `crmAdmission_${kind}_${Date.now()}`;
+  if (!silent) setSheetStatus(`Fetching ${config.label} admission data...`, "busy");
   window[callbackName] = payload => {
     try {
       delete window[callbackName];
@@ -4017,17 +4134,17 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
         if (!retried && /unauthor/i.test(payload?.error || "")) {
           localStorage.removeItem(`${storeKey}.cmafcAdmissionToken`);
           if (silent || auto) return;
-          const nextToken = prompt("Enter CMAFC D26 admission sheet secret token:");
+          const nextToken = prompt("Enter admission sheet secret token:");
           if (nextToken) {
             localStorage.setItem(`${storeKey}.cmafcAdmissionToken`, nextToken.trim());
-            fetchCmafcD26Admissions({ token: nextToken.trim(), retried: true });
+            fetchAdmissionTab(kind, { token: nextToken.trim(), retried: true });
             return;
           }
         }
-        throw new Error(payload?.error || "Could not fetch CMAFC D26.");
+        throw new Error(payload?.error || `Could not fetch ${config.label}.`);
       }
-      const result = importCmafcD26AdmissionRows(payload.rows || []);
-      if (result.created) {
+      const result = importCmafcD26AdmissionRows(payload.rows || [], config);
+      if (result.created || result.updated) {
         saveStickyAdmissions();
         save();
         saveToSheet({ silent: true });
@@ -4035,11 +4152,11 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
       renderAdmissions();
       scheduleReportRefresh();
       localStorage.setItem(`${storeKey}.lastCmafcD26AutoUpdate`, new Date().toISOString());
-      setSheetStatus(`CMAFC D26 update complete: ${result.created} new, ${result.existing} already saved, ${result.skipped} blank/skipped.`, "ok");
-      if (!silent) alert(`CMAFC D26 admissions updated.\nNew records added: ${result.created}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
+      setSheetStatus(`${config.label} update complete: ${result.created} new, ${result.updated} updated, ${result.existing} already saved, ${result.skipped} blank/skipped.`, "ok");
+      if (!silent) alert(`${config.label} admissions updated.\nNew records added: ${result.created}\nUpdated records: ${result.updated}\nAlready saved: ${result.existing}\nBlank/skipped rows: ${result.skipped}`);
     } catch (error) {
-      setSheetStatus(`CMAFC D26 fetch failed: ${error.message}`, "error");
-      if (!silent) alert(`CMAFC D26 fetch failed: ${error.message}`);
+      setSheetStatus(`${config.label} fetch failed: ${error.message}`, "error");
+      if (!silent) alert(`${config.label} fetch failed: ${error.message}`);
     } finally {
       if (auto) cmafcAutoFetchRunning = false;
     }
@@ -4047,7 +4164,8 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
   const script = document.createElement("script");
   script.id = callbackName;
   const params = new URLSearchParams({
-    mode: "cmafcD26",
+    mode: "admissionTab",
+    tabs: config.tabs.join("|"),
     callback: callbackName,
     t: String(Date.now())
   });
@@ -4059,8 +4177,8 @@ function fetchCmafcD26Admissions({ token = null, retried = false, silent = false
     document.getElementById(callbackName)?.remove();
     if (auto) cmafcAutoFetchRunning = false;
     if (!silent) {
-      setSheetStatus("CMAFC D26 fetch failed. Check Apps Script deployment and /exec access.", "error");
-      alert("CMAFC D26 fetch failed. Confirm Apps Script is deployed as Web App: Execute as Me, Who has access Anyone, and URL ends with /exec.");
+      setSheetStatus(`${config.label} fetch failed. Check Apps Script deployment and /exec access.`, "error");
+      alert(`${config.label} fetch failed. Confirm Apps Script is deployed as Web App: Execute as Me, Who has access Anyone, and URL ends with /exec.`);
     }
   };
   document.body.appendChild(script);
@@ -4077,25 +4195,28 @@ function scheduleCmafcD26AutoUpdate() {
   }, 800);
 }
 
-function importCmafcD26AdmissionRows(rows = []) {
+function importCmafcD26AdmissionRows(rows = [], config = admissionFetchConfigs.foundation) {
   let created = 0;
+  let updated = 0;
   let existing = 0;
   let skipped = 0;
-  cleanupCmafcD26LeadsFromLeadList();
+  if (config.batch === "CMAFC D26") cleanupCmafcD26LeadsFromLeadList();
   rows.forEach((row, index) => {
-    const data = cmafcD26RowToAdmissionData(row, index + 2);
+    const data = cmafcD26RowToAdmissionData(row, index + 2, config);
     if (!data.firstName && !data.studentId) {
       skipped += 1;
       return;
     }
-    if (findExistingCmafcD26Admission(data)) {
-      existing += 1;
+    const existingAdmission = findExistingCmafcD26Admission(data);
+    if (existingAdmission) {
+      if (mergeFetchedAdmissionData(existingAdmission, data)) updated += 1;
+      else existing += 1;
       return;
     }
     createCmafcD26AdmissionOnly(data);
     created += 1;
   });
-  return { created, existing, skipped };
+  return { created, updated, existing, skipped };
 }
 
 function stickyAdmissionKey(admission = {}) {
@@ -4109,7 +4230,7 @@ function stickyAdmissionKey(admission = {}) {
 
 function saveStickyAdmissions() {
   const sticky = state.admissions
-    .filter(admission => normalizeAttendanceChoice(admission.batch || "") === normalizeAttendanceChoice("CMAFC D26"))
+    .filter(admission => admission.source === "Admission Sheet" || admission.recordSource === "Admission" || admission.sheetName || ["CMAFC D26", "Inter D26", "Final D26", "Final D27", "Final D26/D27"].some(batch => normalizeAttendanceChoice(admission.batch || "") === normalizeAttendanceChoice(batch)))
     .filter(admission => admission.studentId || admission.receiptNumber || admission.studentName || admission.firstName);
   localStorage.setItem(`${storeKey}.stickyAdmissions`, JSON.stringify(sticky));
 }
@@ -4135,7 +4256,7 @@ function restoreStickyAdmissions(targetState = state) {
   return restored;
 }
 
-function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
+function cmafcD26RowToAdmissionData(row = {}, rowNumber = "", config = admissionFetchConfigs.foundation) {
   const get = (...aliases) => pickSheetValue(row, aliases);
   const fullName = get("student name", "name", "full name", "student", "first name");
   const firstName = titleCase(get("first name", "firstname") || firstNameOf(fullName));
@@ -4144,6 +4265,7 @@ function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
   const branch = get("branch location", "branch", "location", "center", "centre") || detectBranch(Object.values(row).join(" "), Object.values(row).join(" ")) || "Unassigned";
   const admissionDate = parseDateForInput(get("admission date", "date of admission", "joining date", "join date", "adm date", "date")) || "";
   const studentId = get("student id", "studentid", "id", "roll no", "roll number", "registration no", "reg no");
+  const twelfthPercent = config.includeTwelfth ? get("12th %", "12th percentage", "12 percentage", "hsc %", "hsc percentage", "std 12 %", "standard 12 %", "xii %", "xii percentage") : "";
   const rowText = Object.entries(row)
     .filter(([key, value]) => value && !isAdmissionPrivateContactHeader(key))
     .map(([key, value]) => `${key}: ${value}`)
@@ -4155,11 +4277,12 @@ function cmafcD26RowToAdmissionData(row = {}, rowNumber = "") {
     branch,
     admissionDate,
     studentId,
+    twelfthPercent,
     mobile: "",
-    course: "CMA Foundation",
-    batch: "CMAFC D26",
-    sheetName: "CMAFC D26",
-    remarks: `Fetched from CMAFC D26${rowNumber ? ` row ${rowNumber}` : ""}\n${rowText}`
+    course: config.course,
+    batch: row._sheetName || config.batch,
+    sheetName: row._sheetName || config.label,
+    remarks: `Fetched from ${row._sheetName || config.label}${rowNumber ? ` row ${rowNumber}` : ""}\n${rowText}`
   };
 }
 
@@ -4212,6 +4335,32 @@ function findExistingCmafcD26Admission(data) {
   );
 }
 
+function mergeFetchedAdmissionData(admission, data) {
+  let changed = false;
+  const updates = {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    studentName: data.name,
+    branch: data.branch,
+    admissionDate: data.admissionDate,
+    course: data.course,
+    batch: data.batch,
+    studentId: data.studentId,
+    receiptNumber: data.studentId,
+    twelfthPercent: data.twelfthPercent,
+    sheetName: data.sheetName
+  };
+  Object.entries(updates).forEach(([key, value]) => {
+    if (!value) return;
+    if (admission[key] === value) return;
+    if (key === "twelfthPercent" || !admission[key]) {
+      admission[key] = value;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function createCmafcD26AdmissionOnly(data) {
   const counsellor = defaultCounsellorForBranch(data.branch, currentUser?.name || "Admin");
   const payload = {
@@ -4225,12 +4374,15 @@ function createCmafcD26AdmissionOnly(data) {
     batch: data.batch,
     branch: data.branch,
     studentId: data.studentId || "",
+    twelfthPercent: data.twelfthPercent || "",
     feesAgreed: "",
     feesPaid: "",
     paymentMode: "",
     receiptNumber: data.studentId || "",
     counsellor,
     assignedTo: counsellor,
+    source: "Admission Sheet",
+    sheetName: data.sheetName,
     status: "Converted / Admitted",
     remarks: appendRemark("Fetched from CMAFC D26 admission sheet.", data.remarks)
   };
@@ -4358,6 +4510,7 @@ function admissionRowToData(row, headers, mapping, customNames = {}) {
     batch,
     branch,
     admissionDate: parseDateForInput(values.admissionDate) || todayDate(),
+    twelfthPercent: values.twelfthPercent || "",
     feesAgreed: values.feesAgreed || "",
     feesPaid: values.feesPaid || "",
     paymentMode: values.paymentMode || "",
@@ -4390,7 +4543,8 @@ function mergeAdmissionDataIntoLead(lead, data, options = {}) {
     email: data.email,
     course: data.course,
     branch: data.branch,
-    batch: data.batch
+    batch: data.batch,
+    twelfthPercent: data.twelfthPercent
   };
   Object.entries(updates).forEach(([key, value]) => {
     if ((overwrite || !lead[key]) && value) lead[key] = value;
@@ -4417,6 +4571,7 @@ function createLeadFromAdmissionData(data, remark) {
     academicBackground: "",
     currentQualification: "",
     college: "",
+    twelfthPercent: data.twelfthPercent || "",
     source: "Admission Sheet",
     leadSource: "Admission Sheet",
     assignedTo: data.counsellor,
@@ -4426,7 +4581,7 @@ function createLeadFromAdmissionData(data, remark) {
     lastTouchedAt: new Date().toISOString(),
     lastTouchType: "Admission",
     batch: data.batch,
-    customFields: data.customFields || {},
+    customFields: { ...(data.customFields || {}), ...(data.twelfthPercent ? { twelfthPercent: data.twelfthPercent } : {}) },
     remarks: appendRemark(remark, data.remarks)
   };
 }
@@ -4442,6 +4597,7 @@ function upsertAdmissionFromSheet(lead, data) {
     feesPaid: data.feesPaid || "",
     paymentMode: data.paymentMode || "",
     receiptNumber: data.receiptNumber || "",
+    twelfthPercent: data.twelfthPercent || lead.twelfthPercent || lead.customFields?.twelfthPercent || lead.customFields?.["12th %"] || "",
     counsellor: data.counsellor || lead.assignedTo || "",
     remarks: appendRemark(`Imported from admission sheet: ${data.sheetName}`, data.remarks)
   };
@@ -5297,6 +5453,7 @@ function openAdmission(leadId) {
   form.elements.leadId.value = leadId;
   form.elements.admissionDate.value = todayDate();
   form.elements.course.value = lead.course;
+  if (form.elements.twelfthPercent) form.elements.twelfthPercent.value = lead.twelfthPercent || lead.customFields?.twelfthPercent || lead.customFields?.["12th %"] || "";
   form.elements.counsellor.value = defaultCounsellorForBranch(lead.branch || "", lead.assignedTo);
   document.getElementById("admissionDialog").showModal();
 }
@@ -5862,6 +6019,7 @@ function routeActions(e) {
   if (button.dataset.updateOldSheet !== undefined) updateFromOldGoogleSheet();
   if (button.dataset.updateAdmissionSheet !== undefined) updateFromAdmissionGoogleSheet();
   if (button.dataset.fetchCmafcAdmissions !== undefined) fetchCmafcD26Admissions();
+  if (button.dataset.fetchAdmissionTab) fetchAdmissionTab(button.dataset.fetchAdmissionTab);
   if (button.dataset.syncLeadsAdmissions !== undefined) syncLeadsAndAdmissions();
   if (button.dataset.importLegacySheet !== undefined) confirmImportLegacySheet();
   if (button.dataset.importAdmissionSheet !== undefined) confirmImportAdmissionSheet();

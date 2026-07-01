@@ -1,9 +1,11 @@
 const SHEET_NAME = "Database";
 const OLD_LEADS_SHEET_NAME = "Form Responses 1";
-const ADMISSION_SHEET_NAMES = ["CMAFC D26", "Inter D26"];
+const ADMISSION_SHEET_NAMES = ["CMAFC D26", "Inter D26", "Final D26", "Final D27"];
 const ADMISSION_SHEET_PATTERNS = [
   ["cmafc", "d26"],
-  ["inter", "d26"]
+  ["inter", "d26"],
+  ["final", "d26"],
+  ["final", "d27"]
 ];
 
 function doGet(e) {
@@ -16,6 +18,8 @@ function doGet(e) {
       ? readOldLeadResponses_()
       : mode === "admissions"
         ? readAdmissionSheets_()
+        : mode === "admissionTab"
+          ? readAdmissionTabs_(e.parameter.tabs || "")
         : { ok: true, data: readDatabase_() };
   } catch (error) {
     payload = { ok: false, error: error.message };
@@ -73,7 +77,12 @@ function requiredProperty_(key) {
 }
 
 function requireAccess_(e) {
-  const expected = property_("CRM_ACCESS_TOKEN");
+  const mode = e.parameter.mode || "load";
+  const expected = mode === "legacy"
+    ? property_("LEADS_ACCESS_TOKEN") || property_("CRM_ACCESS_TOKEN")
+    : mode === "admissions" || mode === "admissionTab"
+      ? property_("ADMISSION_ACCESS_TOKEN") || property_("CRM_ACCESS_TOKEN")
+      : property_("CRM_ACCESS_TOKEN");
   if (!expected) return;
   const actual = e.parameter.token || "";
   if (actual !== expected) throw new Error("Unauthorized cloud access");
@@ -101,6 +110,27 @@ function readAdmissionSheets_() {
     throw new Error(`Admission tabs not found. Available tabs: ${available}`);
   }
   const tabs = sheets.map(sheet => readRowsFromSheet_(sheet, sheet.getName()));
+  const headers = Array.from(new Set(tabs.flatMap(tab => tab.headers)));
+  const rows = tabs.flatMap(tab => tab.rows.map(row => ({ ...row, _sheetName: tab.source })));
+  return { ok: true, source: "Admission Sheets", tabs: tabs.map(tab => tab.source), headers, rows };
+}
+
+function readAdmissionTabs_(tabsText) {
+  const requested = String(tabsText || "")
+    .split("|")
+    .map(name => name.trim())
+    .filter(Boolean);
+  if (!requested.length) throw new Error("No admission tab requested");
+  const spreadsheet = SpreadsheetApp.openById(requiredProperty_("ADMISSION_SPREADSHEET_ID"));
+  const tabs = requested.map(name => {
+    const sheet = findSheetByName_(spreadsheet, name);
+    if (!sheet) return null;
+    return readRowsFromSheet_(sheet, sheet.getName());
+  }).filter(Boolean);
+  if (!tabs.length) {
+    const available = spreadsheet.getSheets().map(sheet => sheet.getName()).join(", ");
+    throw new Error(`Requested admission tabs not found: ${requested.join(", ")}. Available tabs: ${available}`);
+  }
   const headers = Array.from(new Set(tabs.flatMap(tab => tab.headers)));
   const rows = tabs.flatMap(tab => tab.rows.map(row => ({ ...row, _sheetName: tab.source })));
   return { ok: true, source: "Admission Sheets", tabs: tabs.map(tab => tab.source), headers, rows };

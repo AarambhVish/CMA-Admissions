@@ -283,6 +283,12 @@ textarea { width: 100%; resize: vertical; }
   display: grid; grid-template-columns: repeat(6, minmax(135px, 1fr));
   gap: 10px; margin: 14px 0;
 }
+.query-report-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 120px;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
 #attendanceFilters {
   grid-template-columns: minmax(155px, 1.2fr) minmax(125px, .9fr) minmax(170px, 1fr) minmax(105px, .65fr) 38px 38px;
   gap: 6px;

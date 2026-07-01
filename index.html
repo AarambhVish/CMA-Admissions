@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMA Admission CRM</title>
-  <link rel="stylesheet" href="styles.css?v=20260629-user-save-options-fix">
+  <link rel="stylesheet" href="styles.css?v=20260701-admission-query-imports">
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -81,6 +81,7 @@
       <div class="toolbar">
         <button class="primary" data-open-form>Add Manual Lead</button>
         <button data-open-bulk>Bulk Paste Import</button>
+        <button data-update-old-sheet>Update Leads from Google Sheet</button>
       </div>
       <div class="filters" id="leadFilters"></div>
       <div id="leadTable" class="table-wrap"></div>
@@ -106,8 +107,10 @@
 
     <section id="admissions" class="page">
       <div class="toolbar">
-        <button class="primary" data-fetch-cmafc-admissions>Update CMAFC D26 Admissions</button>
-        <span class="bulk-help">Reads First Name, Last initial, Branch Location, Admission Date, and Student ID from your restricted Google Sheet through Apps Script.</span>
+        <button class="primary" data-fetch-admission-tab="foundation">Update CMAFC D26</button>
+        <button class="primary" data-fetch-admission-tab="inter">Update Inter D26</button>
+        <button class="primary" data-fetch-admission-tab="final">Update Final D26/D27</button>
+        <span class="bulk-help">Reads First Name, Last initial, Branch Location, Admission Date, Student ID, and Foundation 12th % where available from your restricted Google Sheet through Apps Script.</span>
       </div>
       <div class="filters" id="admissionFilters"></div>
       <div id="admissionTable" class="table-wrap"></div>
@@ -246,6 +249,15 @@
     <section id="reports" class="page">
       <div class="filters" id="reportFilters"></div>
       <div id="reportSummary" class="metric-grid"></div>
+      <section class="panel">
+        <h2>Query Report</h2>
+        <p class="bulk-help">Type what you want, for example: admissions by branch, leads by status, attendance by batch, admissions list, leads list.</p>
+        <form id="queryReportForm" class="query-report-form">
+          <input id="queryReportInput" placeholder="Type report command">
+          <button class="primary">Run</button>
+        </form>
+        <div id="queryReportOutput" class="table-wrap"><p class="muted">Run a command to see a custom report.</p></div>
+      </section>
       <div class="split">
         <section class="panel">
           <h2>Leads Pivot Summary</h2>
@@ -448,6 +460,7 @@
         <input name="admissionDate" type="date" required>
         <select name="course"></select>
         <select name="batch"></select>
+        <input name="twelfthPercent" placeholder="12th % if available">
         <input name="feesAgreed" type="number" placeholder="Fees agreed">
         <input name="feesPaid" type="number" placeholder="Fees paid">
         <input name="paymentMode" placeholder="Payment mode">
@@ -551,6 +564,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260629-user-save-options-fix"></script>
+  <script src="app.js?v=20260701-admission-query-imports"></script>
 </body>
 </html>
