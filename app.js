@@ -3,12 +3,12 @@ const resetGeneration = "2026-06-27-clean";
 const recoveryAdminPasswordHash = "c1c224b03cd9bc7b6a86d77f5dace40191766c485cd55dc48caf9ac873335d6f";
 const fixedSheetWebAppUrl = [
   "https://script.google.com/macros/s/",
-  "AKfycbzA9esWRGpkxtczOMvjKbHpRux0J2hPc7vQdCcHhgYfl4AYIyM2aCHJtNJoyCpOFzqJ_A",
+  "AKfycby5e31K2ZvUAH84w2TDa__oe5wU-H5RO_IV7hHAcfp6JIPOTTlSF7cZrWlHxTN1tVBa-g",
   "/exec"
 ].join("");
 const fixedCmafcAdmissionWebAppUrl = [
   "https://script.google.com/macros/s/",
-  "AKfycbwHH2k9b-HDEGLFBrQyBUuw0JMlDs5DogfUO3gaidDr5Hw-RCwbbkQiRawq0cUt_zTR",
+  "AKfycby5e31K2ZvUAH84w2TDa__oe5wU-H5RO_IV7hHAcfp6JIPOTTlSF7cZrWlHxTN1tVBa-g",
   "/exec"
 ].join("");
 const fixedDatabaseSpreadsheetUrl = "";
