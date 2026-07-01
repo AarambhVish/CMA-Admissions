@@ -2006,10 +2006,12 @@ function attendanceRoster() {
 }
 
 function admissionRowsForAttendance() {
-  return admissionsWithLead().filter(row => {
-    const batch = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
-    return batch && batch !== "Unassigned";
-  });
+  return admissionsWithLead()
+    .map(row => {
+      const attendanceBatch = attendanceBatchFromAdmission(row);
+      return { ...row, originalAdmissionBatch: row.batch || "", batch: attendanceBatch };
+    })
+    .filter(row => row.batch && row.batch !== "Unassigned");
 }
 
 function admissionToAttendanceStudent(row) {
@@ -2017,7 +2019,7 @@ function admissionToAttendanceStudent(row) {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   const firstName = titleCase(row.firstName || parts[0] || "Student");
   const lastName = lastInitialOnly(row.lastName || parts.slice(1).join(" ") || "");
-  const batch = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
+  const batch = normalizeAttendanceBatch(row.batch || attendanceBatchFromAdmission(row));
   if (!batch) return null;
   const branch = row.branch || attendanceBatchLocation(batch) || "Unassigned";
   const counsellor = effectiveCounsellorForBranch(branch, row.counsellor || row.assignedTo || "");
@@ -2038,8 +2040,42 @@ function admissionToAttendanceStudent(row) {
     studentType: "Admitted",
     createdAt: row.admissionDate || row.createdAt || "",
     createdBy: counsellor,
+    assignedTo: counsellor,
     source: "Admission"
   };
+}
+
+function attendanceBatchFromAdmission(row = {}) {
+  const saved = normalizeAttendanceBatch(row.batch || row.assignedBatch || row.assignBatch || "");
+  const branch = row.branch || (String(saved).split("_").filter(Boolean).length >= 3 ? attendanceBatchLocation(saved) : "");
+  if (saved && saved !== "Unassigned" && String(saved).split("_").filter(Boolean).length >= 3) return saved;
+  const course = row.course || attendanceCourseFromBatch(saved);
+  const code = attendanceCourseCode(course, saved);
+  const attempt = attendanceAttemptCode(row.attempt || saved || row.originalAdmissionBatch || "");
+  const branchCode = attendanceBranchCode(branch);
+  if (code && attempt && branchCode) return `${code}_${attempt}_${branchCode}`;
+  return saved || "Unassigned";
+}
+
+function attendanceCourseCode(course = "", fallback = "") {
+  const text = `${course} ${fallback}`.toLowerCase();
+  if (text.includes("inter") || text.includes("cmai")) return "CMAI";
+  if (text.includes("final")) return "CMAFINAL";
+  return "CMAF";
+}
+
+function attendanceAttemptCode(value = "") {
+  const text = String(value || "").toUpperCase();
+  const compact = text.replace(/\s+/g, "");
+  const direct = compact.match(/\b[DJ]\d{2}\b/) || compact.match(/[DJ]\d{2}/);
+  if (direct) return direct[0];
+  const month = /DEC|DECEMBER/.test(text) ? "D" : /JUN|JUNE/.test(text) ? "J" : "";
+  const year = text.match(/\b20(\d{2})\b/) || text.match(/\b(\d{2})\b/);
+  return month && year ? `${month}${year[1]}` : "";
+}
+
+function attendanceBranchCode(branch = "") {
+  return titleCase(String(branch || "").trim()).replace(/\s+/g, "");
 }
 
 function normalizeAttendanceBatch(batch = "") {
@@ -2053,10 +2089,10 @@ function canAccessAttendanceBatch(batch = "", branch = "") {
   const userName = normalizePersonName(currentUser?.name || "");
   const ownBranches = userBranchList(currentUser).map(normalizeAttendanceChoice);
   const hasOwnAdmission = admissionsWithLead().some(row =>
-    normalizeAttendanceChoice(row.batch || "") === normalizedBatch &&
+    normalizeAttendanceChoice(attendanceBatchFromAdmission(row)) === normalizedBatch &&
     (normalizePersonName(admissionRowCounsellor(row)) === userName || normalizePersonName(row.counsellor || "") === userName || normalizePersonName(row.assignedTo || "") === userName)
   );
-  const batchHasAdmissions = state.admissions.some(admission => normalizeAttendanceChoice(admission.batch || "") === normalizedBatch);
+  const batchHasAdmissions = admissionsWithLead().some(admission => normalizeAttendanceChoice(attendanceBatchFromAdmission(admission)) === normalizedBatch);
   const hasOwnManualStudent = state.attendanceStudents.some(student =>
     !student.archivedAt &&
     normalizeAttendanceChoice(student.batch || "") === normalizedBatch &&
